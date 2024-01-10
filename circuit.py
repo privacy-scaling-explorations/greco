@@ -56,15 +56,18 @@ def main():
 
         # a_i is a polynomial sampled from Rqi (Ring of polynomials with coefficients in Zqi modulo the cyclotomic polynomial)
         a_i = bfv_i.Rq.sample_polynomial()
-        a_i_times_s = poly_mul(a_i.coefficients, s.coefficients)
-        a_i_times_s_plus_e = poly_add(a_i_times_s, e.coefficients)
 
         # k0 is equal to the negative of the multiplicative inverse of t modulo qi
         k0_i = mod_inverse(t, qi) * (-1)
+
+        # Perform encryption
+        a_i_times_s = poly_mul(a_i.coefficients, s.coefficients)
+        a_i_times_s_plus_e = poly_add(a_i_times_s, e.coefficients)
         k0_times_k1_i = poly_mul([k0_i], k1.coefficients)
         ct0_i = poly_add(a_i_times_s_plus_e, k0_times_k1_i)
         ct0_i = Polynomial(ct0_i, bfv_i.Rq)
         ciphertext_i = (ct0_i, a_i)
+        
         ciphertexts.append(ciphertext_i)
 
     # PHASE 1
