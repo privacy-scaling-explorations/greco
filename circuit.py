@@ -2,7 +2,6 @@ from bfv.crt import CRTModuli
 from bfv.bfv import BFV, RLWE
 from bfv.discrete_gauss import DiscreteGaussian
 from bfv.polynomial import Polynomial, poly_div, get_centered_remainder
-import numpy as np
 from utils import SecretKeyEncrypt
 from random import randint
 import copy
