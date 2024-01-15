@@ -2,6 +2,7 @@ from bfv.crt import CRTModuli
 from bfv.bfv import BFV, RLWE
 from bfv.discrete_gauss import DiscreteGaussian
 from bfv.polynomial import Polynomial, poly_div, get_centered_remainder
+import numpy as np
 from utils import SecretKeyEncrypt
 from random import randint
 import copy
@@ -127,6 +128,9 @@ def main():
         # For experiment, just generate a random alpha
         alpha = randint(0, 100)
 
+        # vi + P1 * cyclo + P2 * qi = ti (note: this is failing atm)
+        lhs = Polynomial(input["ciphertext"][0].coefficients) + p1_times_cyclo + Polynomial(p2.coefficients) * Polynomial([qis[i]])
+
         # PHASE 1
         # Assign si as input to the circuit (private)
         # Assign ei as input to the circuit (private)
@@ -161,8 +165,18 @@ def main():
         p2_alpha = Polynomial(p2.coefficients).evaluate(alpha)
 
         # Compute ti(alpha) inside the circuit
+        # ti(alpha) = ai(alpha) * s(alpha) + e(alpha) + k1i(alpha)
+        ti_alpha = ai_alpha * s_alpha + e_alpha + k1i_alpha
+
+        # sanity check
+        assert ti_alpha == ti.evaluate(alpha)
+        
         # Compute P1(alpha) * cyclo(alpha) inside the circuit
+        pi_alpha_times_cyclo_alpha = p1_alpha * cyclo_alpha
+
         # Compute P2(alpha) * qi inside the circuit
+        pi_alpha_times_qi = p2_alpha * qis[i]
+
         # Assert that vi(alpha) + P1(alpha) * cyclo(alpha) + P2(alpha) * qi(alpha) = ti(alpha)
         # Assert that coefficients of the matrix are in the expected range
 
