@@ -3,6 +3,8 @@ from bfv.bfv import BFV, RLWE
 from bfv.discrete_gauss import DiscreteGaussian
 from bfv.polynomial import Polynomial, poly_div, get_centered_remainder
 from utils import SecretKeyEncrypt
+from random import randint
+import copy
 
 
 def main():
@@ -65,10 +67,12 @@ def main():
     for i, input in enumerate(inputs):
         # Precomputation phase
         ai = input["a"].coefficients
+        ai = [int(x) for x in ai]
         si = secret_key.coefficients
         ei = e.coefficients
-        k0i = input["k0"]
+        k0i = int(input["k0"])
         k1i = input["k1"].coefficients
+        k1i = [int(x) for x in k1i]
         cyclo = [1] + [0] * (len(ai) - 1) + [1]
 
         # ai * si + ei + ki = ti (this is ct0 before reduction)
@@ -79,11 +83,11 @@ def main():
 
         # vi = ct0
         # vi = ai * si + ei + ki mod Rqi
-        # vi = ai * si + ei + ki - P1(cyclo) mod Zqi
-        # vi = ai * si + ei + ki - P1(cyclo) - P2*qi mod Zp
+        # vi = ai * si + ei + ki - P1 * cyclo mod Zqi
+        # vi = ai * si + ei + ki - P1 * cyclo - P2*qi mod Zp
 
-        # assert that vi = t1 mod Rqi
-        ti_clone = Polynomial(ti.coefficients)
+        # assert that vi = ti mod Rqi
+        ti_clone = Polynomial(copy.deepcopy(ti.coefficients))
         # mod Zqi means that we need to:
         # - reduce the coefficients of ti by the cyclotomic polynomial
         # - reduce the coefficients of ti by the modulus
@@ -93,34 +97,73 @@ def main():
 
         # Calculate P1
         # (ti mod Zqi) / cyclo = (quotient, remainder) where quotient = P1 and the remainder is equal to vi
-        ti_mod_zqi = Polynomial(ti.coefficients)
+        ti_mod_zqi = Polynomial(copy.deepcopy(ti.coefficients))
         ti_mod_zqi.reduce_coefficients_by_modulus(qis[i])
         (quotient, rem) = poly_div(ti_mod_zqi.coefficients, cyclo)
         # Get the centered remainder representation from each coefficient of rem
         rem = [get_centered_remainder(x, qis[i]) for x in rem]
+        # Assert that the remainder is equal to vi
         assert rem == input["ciphertext"][0].coefficients
+        # Get the centered remainder representation from each coefficient of quotient
+        quotient = [get_centered_remainder(x, qis[i]) for x in quotient]
+        p1 = Polynomial(quotient)
+
+        # Calculate P2
+        # reducing each coefficient of poly `a` by the modulus `qi` can be represented as: a = qi * b + r
+        # where b is the quotient and r is the remainder
+        # ti - P1 * cyclo / qi = (quotient, remainder) where quotient = P2 and the remainder is equal to vi
+        p1_times_cyclo = Polynomial(p1.coefficients) * Polynomial(cyclo)
+        minus_p1_times_cyclo = Polynomial([-1]) * p1_times_cyclo
+        num = Polynomial(ti.coefficients) + minus_p1_times_cyclo
+        (quotient, rem) = poly_div(num.coefficients, [qis[i]])
+        # Get the centered remainder representation from each coefficient of rem
+        rem = [get_centered_remainder(x, qis[i]) for x in rem]
+        # Assert that the remainder is equal to vi
+        assert rem == input["ciphertext"][0].coefficients
+        # Get the centered remainder representation from each coefficient of quotient
+        quotient = [get_centered_remainder(x, qis[i]) for x in quotient]
+        p2 = Polynomial(quotient)
+        # Commit to phase 1 witness and fetch alpha
+        # For experiment, just generate a random alpha
+        alpha = randint(0, 100)
 
         # PHASE 1
-        # Assign Ai as input to the circuit (public)
-        # Assign Si as input to the circuit (private)
-        # Assign Ei as input to the circuit (private)
+        # Assign si as input to the circuit (private)
+        # Assign ei as input to the circuit (private)
+        # Assign k1i as input to the circuit (private)
+        # Assign P1 as input to the circuit (private)
+        # Assign P2 as input to the circuit (private)
+
+        # Precomputation phase 
+        # Evaluate ai(alpha), cyclo(alpha), vi(alpha)
+        ai_alpha = Polynomial(ai).evaluate(alpha)
+        cyclo_alpha = Polynomial(cyclo).evaluate(alpha)
+        vi_alpha = Polynomial(input["ciphertext"][0].coefficients).evaluate(alpha)
+
+        # PHASE 2
+        # Assign ai(alpha) as input to the circuit (public)
         # Assign K0i as input to the circuit (public)
-        # Assign K1i as input to the circuit (public)
-        # Assign cyclo as input to the circuit (public)
+        # Assign cyclo(alpha) as input to the circuit (public)
+        # Assign vi(alpha) as input to the circuit (public)
 
-        # Pass P1 as input to the circuit (private)
-        # Pass P2 as input to the circuit (private)
+        # Prove that ti - P1 * cyclo - P2 * qi = vi mod Zp by evaluating LHS and RHS at alpha
+        # vi(alpha), cyclo(alpha), qi are public inputs. Also ai(alpha), which will be necessary to compute ti(alpha) is a public input
+
+        # Constrain the evaluation of s(alpha)
+        # Constrain the evaluation of e(alpha)
+        # Constrain the evaluation of k1i(alpha)
+        # Constrain the evaluation of P1(alpha)
+        # Constrain the evaluation of P2(alpha)
+        s_alpha = Polynomial(si).evaluate(alpha)
+        e_alpha = Polynomial(e.coefficients).evaluate(alpha)
+        k1i_alpha = Polynomial(k1i).evaluate(alpha)
+        p1_alpha = Polynomial(p1.coefficients).evaluate(alpha)
+        p2_alpha = Polynomial(p2.coefficients).evaluate(alpha)
+
+        # Compute ti(alpha) inside the circuit
+        # Compute P1(alpha) * cyclo(alpha) inside the circuit
+        # Compute P2(alpha) * qi inside the circuit
+        # Assert that vi(alpha) + P1(alpha) * cyclo(alpha) + P2(alpha) * qi(alpha) = ti(alpha)
         # Assert that coefficients of the matrix are in the expected range
-        # Commit to phase 1 and fetch alpha
-
-
-# PHASE 2
-# Fetch alpha
-# Pass A(alpha) as input to the circuit (public)
-# Pass Ki^0(alpha) as input to the circuit (public)
-# Pass cyclo(alpha) as input to the circuit (public)
-# Pass Ti(alpha) as input to the circuit (public)
-# Assert that U(IV) = Ti(alpha)
-
 
 main()
