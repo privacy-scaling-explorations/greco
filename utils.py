@@ -23,9 +23,9 @@ def SecretKeyEncrypt(
     - qi: RNS modulus
 
     Returns:
-    ciphertext: Generated ciphertext.
-    k^{0} : equals to -t^{-1}\
-    k^{1} : equals to [QM]t
+    - ciphertext: Generated ciphertext.
+    - k0 : equals to -t^{-1}
+    - k1 : equals to [QM]t
     """
 
     # Compute the ciphertext.
@@ -82,3 +82,9 @@ def mod_inverse(t, q):
         raise ValueError("The multiplicative inverse does not exist")
     else:
         return x % q
+
+def adjust_negative_coefficients(poly : Polynomial, modulus: int) -> Polynomial:
+    """
+    Adjust the coefficients of the polynomial to be positive.
+    """
+    return Polynomial([(modulus + coeff if coeff < 0 else coeff) for coeff in poly.coefficients])
