@@ -53,6 +53,7 @@ def main():
     for qi in qis:
         bfv_rqi = BFV(RLWE(n, qi, t, discrete_gaussian))
         # a is the polynomial sampled from the uniform distribution in the RNS basis
+        # TODO: add test for this
         a = bfv_rqi.rlwe.Rq.sample_polynomial()
         (ciphertext, k0, k1) = SecretKeyEncrypt(
             a, s, e, m, t, crt_moduli.q, qi
@@ -151,6 +152,7 @@ def main():
         # assert that rem_2 = rem_1 + P1 * cyclo
         lhs = Polynomial(rem_2)
         rhs = Polynomial(rem_1) + p1 * cyclo
+        # TODO: fix bug, sometimes this check fails
         assert lhs == rhs
 
         # assert that rem_2 = ti + P1 * cyclo mod Zqi
@@ -221,21 +223,18 @@ def main():
         # sanity check
         assert vi_alpha == vi.evaluate(alpha)
         
-        # Compute P1(alpha) * cyclo(alpha) + ti_alpha mod Zqi inside the circuit
-        # TODO
-        p1_times_cyclo_plus_ti = p1 * cyclo + ti
-        p1_times_cyclo_plus_ti_reduced = []
-        for coeff in p1_times_cyclo_plus_ti.coefficients:
-            p1_times_cyclo_plus_ti_reduced.append(coeff % qis[i])
-        p1_times_cyclo_plus_ti_reduced = Polynomial(p1_times_cyclo_plus_ti_reduced)
-        p1_times_cyclo_plus_ti_alpha = p1_times_cyclo_plus_ti_reduced.evaluate(alpha)
+        # Compute P1(alpha) * cyclo(alpha) + ti_alpha
+        p1_alpha_times_cyclo_alpha_plus_ti_alpha = p1_alpha * cyclo_alpha + ti_alpha
 
         # Compute P2(alpha) * qi inside the circuit
         p2_alpha_times_qi = p2_alpha * qis[i]
 
-        # Assert that vi(alpha) = P2(alpha) * qi + [ti(alpha) + P1(alpha) * cyclo(alpha) mod Zqi] 
-        lhs = vi_alpha 
-        rhs = p2_alpha_times_qi + p1_times_cyclo_plus_ti_alpha
+        # Assert that vi(alpha) = P2(alpha) * qi + ti(alpha) + P1(alpha) * cyclo(alpha)
+        # TODO: explain why we need to reduce the coefficients of the RHS by the modulus qi
+        lhs = vi_alpha % qis[i]
+        rhs = (p2_alpha_times_qi + p1_alpha_times_cyclo_alpha_plus_ti_alpha) % qis[i]
+        
         assert lhs == rhs
 
+        # TODO: add range check for private inputs
 main()
