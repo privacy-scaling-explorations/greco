@@ -8,7 +8,8 @@ import copy
 
 
 def main():
-    # Setup
+
+    # SETUP
     # q is the ciphertext modulus, which is the product of all qis
     # t is the plaintext modulus
     # n is the degree of the cyclotomic polynomial which is the denominator of the polynomial ring
@@ -42,18 +43,19 @@ def main():
     # s is the secret key polynomial, sampled from the ternary distribution {-1, 0, 1}
     # e is the error polynomial, sampled from the discrete Gaussian distribution
     # m is the message polynomial, sampled from the plaintext space
-    secret_key = bfv.rlwe.SampleFromTernaryDistribution()
+    s = bfv.rlwe.SampleFromTernaryDistribution()
     e = bfv.rlwe.SampleFromErrorDistribution()
-    message = bfv.rlwe.Rt.sample_polynomial()
+    m = bfv.rlwe.Rt.sample_polynomial()
 
     inputs = []
 
     # perform secret key encryption on m in RNS basis and extract the input for the circuit
     for qi in qis:
         bfv_rqi = BFV(RLWE(n, qi, t, discrete_gaussian))
+        # a is the polynomial sampled from the uniform distribution in the RNS basis
         a = bfv_rqi.rlwe.Rq.sample_polynomial()
         (ciphertext, k0, k1) = SecretKeyEncrypt(
-            a, secret_key, e, message, t, crt_moduli.q, qi
+            a, s, e, m, t, crt_moduli.q, qi
         )
         input = {
             "ciphertext": ciphertext,
@@ -65,12 +67,16 @@ def main():
     # Each loop simulates a circuit in a different RNS basis
     for i, input in enumerate(inputs):
 
-        # Precomputation phase - performed outside the circuit
-        # TODO : add explanation about negative coefficients
-        ai = Polynomial(input["ciphertext"][1].coefficients)
-        ai = Polynomial([-1]) * ai
-        ai = adjust_negative_coefficients(ai, qis[i])
-        si = adjust_negative_coefficients(secret_key, qis[i])
+        # PRECOMPUTATION PHASE - performed outside the circuit
+
+        # The polynomials have now coefficients in the range (-qi/2, qi/2]
+        # the circuit works with field elements in Zp, where p is the prime field of the circuit
+        # In order to express the polynomials in Zp, we represent the coefficients in the range [0, qi).
+        # Every coefficient in the range [0, qi/2] is normally represented in the range [0, qi/2], 
+        # Every coefficient in the range (-qi/2, 0) is represented in the range (qi/2, qi) using the `adjust_negative_coefficients` function
+        minus_ai = input["ciphertext"][1]
+        ai = adjust_negative_coefficients(Polynomial([-1]) * minus_ai, qis[i])
+        si = adjust_negative_coefficients(s, qis[i])
         ei = adjust_negative_coefficients(e, qis[i])
         k0i = adjust_negative_coefficients(Polynomial([input["k0"]]), qis[i])
         k1i = adjust_negative_coefficients(input["k1"], qis[i])
@@ -83,87 +89,93 @@ def main():
         vi_part3 = k0i * k1i
         vi = vi_part1 + vi_part2 + vi_part3
 
-        # assert that vi_part1 does not have negative coefficients
-        for coeff in vi_part1.coefficients:
-            assert coeff >= 0
-
-        # assert that vi_part2 does not have negative coefficients
-        for coeff in vi_part2.coefficients:
-            assert coeff >= 0
-
-        # assert that vi_part3 does not have negative coefficients
-        for coeff in vi_part3.coefficients:
-            assert coeff >= 0
-
-        # assert that vi does not have negative coefficients
-        for coeff in vi.coefficients:
-            assert coeff >= 0
-
         # ti = ct0
-        # ti = ai * si + ei + ki mod Rqi
-        # ti = ai * si + ei + ki - P1 * cyclo mod Zqi
-        # ti = ai * si + ei + ki - P1 * cyclo - P2*qi mod Zp
-        ti = Polynomial(input["ciphertext"][0].coefficients)
+        # ti = vi mod Rqi
+        # ti = vi - P1 * cyclo mod Zqi
+        # ti = vi - P1 * cyclo - P2*qi mod Zp
+        ti = input["ciphertext"][0]
         ti = adjust_negative_coefficients(ti, qis[i])
 
         # assert that ti = vi mod Rqi
         vi_clone = copy.deepcopy(vi)
         # mod Rqi means that we need to:
-        # - reduce the coefficients of vi by the cyclotomic polynomial
-        # - reduce the coefficients of vi by the modulus
+        # - reduce the coefficients of vi_clone by the cyclotomic polynomial
+        # - reduce the coefficients of vi_clone by the modulus
         vi_clone.reduce_coefficients_by_cyclo(cyclo.coefficients)
         vi_clone_reduced = [] 
         for coeff in vi_clone.coefficients:
             vi_clone_reduced.append(coeff % qis[i])
         assert Polynomial(vi_clone_reduced) == ti
 
-        # Calculate P1
-        # (vi mod Zqi) / cyclo = (quotient, remainder) where quotient = P1 and the remainder is equal to ti        
+        # Calculate P1 
+        # ti = vi - P1 * cyclo mod Zqi
+        # P1 * cyclo + ti = Vi mod Zqi
+        # Vi mod Zqi / cyclo = (quotient, remainder) where quotient = P1 and the remainder = ti  
+
         # reduce the coefficients of vi by the modulus
         vi_mod_zqi = []
         for coeff in vi.coefficients:
-            vi_mod_zqi.append(coeff % qis[i])
-        vi_mod_zqi = Polynomial(vi_mod_zqi)
-
-        # assert that vi_mod_zqi does not have negative coefficients
-        for coeff in vi_mod_zqi.coefficients:
-            assert coeff >= 0
-
-        (quotient, rem) = poly_div(vi_mod_zqi.coefficients, cyclo.coefficients)
-        rem_adj = adjust_negative_coefficients(Polynomial(rem), qis[i])
+            vi_mod_zqi.append(coeff % qis[i])     
+        (quotient, rem_1) = poly_div(vi_mod_zqi, cyclo.coefficients)
         p1 = Polynomial(quotient)
-        # assert that the remainder is equal to ti
+        # adjust the coefficient of the remainder to be inside the field Zp
+        rem_adj = adjust_negative_coefficients(Polynomial(rem_1), qis[i])
+        # assert that the rem_adj is equal to ti
         assert rem_adj == ti
 
-        # assert that vi_mod_zqi = P1 * cyclo + rem
+        # assert that vi_mod_zqi = P1 * cyclo + rem_1
         lhs = vi_mod_zqi
-        rhs = p1 * cyclo + Polynomial(rem)
-        assert lhs == rhs
+        rhs = p1 * cyclo + Polynomial(rem_1)
+        assert Polynomial(lhs) == rhs
 
-        # assert that P1 does not have negative coefficients
-        for coeff in p1.coefficients:
-            assert coeff >= 0
+        # assert that vi_mod_zqi = P1 * cyclo + ti mod Zqi
+        # We need to further reduce the coefficients of RHS by the modulus qi because the operation of `adjust_negative_coefficients` operated on ti does not guarantee that the coefficients are in the range [0, qi)
+        lhs = vi_mod_zqi    
+        rhs = p1 * cyclo + ti
+        rhs_reduced = []
+        for coeff in rhs.coefficients:
+            rhs_reduced.append(coeff % qis[i])
+        assert lhs == rhs_reduced        
 
         # Calculate P2
-        # reducing each coefficient of poly `a` by the modulus `qi` can be represented as: a = b * qi + r
+        # ti = vi - P1 * cyclo - P2*qi mod Zp
+        # P2*qi + P1 * cyclo + ti = vi mod Zp
+        # The operation reducing each coefficient of poly `a` by the modulus `qi` can be represented as: a = b * qi + r
         # where b is the quotient and r is the remainder
-        # vi - P1 * cyclo / qi = (quotient, remainder) where quotient = P2 and the remainder is equal to ti
-        p1_times_cyclo = p1 * cyclo
-        minus_p1_times_cyclo = Polynomial([-1]) * p1_times_cyclo
-        minus_p1_times_cyclo = adjust_negative_coefficients(minus_p1_times_cyclo, qis[i])
-        num = vi + minus_p1_times_cyclo
-        (quotient, rem) = poly_div(num.coefficients, [qis[i]])
-        p2 = Polynomial(quotient)
-        # assert that P2 does not have negative coefficients
-        for coeff in p2.coefficients:
-            assert coeff >= 0
-        rem_adj = adjust_negative_coefficients(Polynomial(rem), qis[i])
-        assert rem_adj == ti
+        # in this case, we reduce the coefficients of vi mod Zp by the modulus `qi`, the quotient is P2 and the remainder is ti + P1 * cyclo
 
-        # assert that vi - P1 * cyclo = P2 * qi + rem_adj
-        lhs = vi + minus_p1_times_cyclo
-        rhs = p2 * Polynomial([qis[i]]) + rem_adj
+        # vi mod Zp is equal to vi according to the assumptions of the circuits
+        (quotient, rem_2) = poly_div(vi.coefficients, [qis[i]])
+        p2 = Polynomial(quotient)
+
+        # assert that rem_2 = rem_1 + P1 * cyclo
+        lhs = Polynomial(rem_2)
+        rhs = Polynomial(rem_1) + p1 * cyclo
         assert lhs == rhs
+
+        # assert that rem_2 = ti + P1 * cyclo mod Zqi
+        # We need to further reduce the coefficients of RHS by the modulus qi because the operation of `adjust_negative_coefficients` operated on ti does not guarantee that the coefficients are in the range [0, qi)
+        lhs = Polynomial(rem_2)
+        rhs = ti + p1 * cyclo
+        rhs_reduced = []
+        for coeff in rhs.coefficients:
+            rhs_reduced.append(coeff % qis[i])
+        assert lhs == Polynomial(rhs_reduced)
+
+        # assert that vi mod Zp = P2 * qi + rem_2
+        lhs = vi
+        rhs = p2 * Polynomial([qis[i]]) + Polynomial(rem_2)
+        assert lhs == rhs
+
+        # assert that vi mod Zp = P2 * qi + [ti + P1 * cyclo mod Zqi]
+        # We need to further reduce the coefficients of [ti + P1 * cyclo mod Zqi] by the modulus qi because the operation of `adjust_negative_coefficients` operated on ti does not guarantee that the coefficients are in the range [0, qi)
+        lhs = vi
+        rhs = ti + p1 * cyclo
+        rhs_reduced = []
+        for coeff in rhs.coefficients:
+            rhs_reduced.append(coeff % qis[i])
+        rhs_reduced = Polynomial(rhs_reduced) + p2 * Polynomial([qis[i]])
+        assert lhs == rhs_reduced
 
         # Commit to phase 1 witness and fetch alpha
         # For experiment, just generate a random alpha
@@ -188,7 +200,7 @@ def main():
         # Assign cyclo(alpha) as input to the circuit (public)
         # Assign ti(alpha) as input to the circuit (public)
 
-        # Prove that vi - P1 * cyclo = P2 * qi + ti mod Zp by evaluating LHS and RHS at alpha
+        # Prove that vi = P2 * qi + P1 * cyclo + ti mod Zp by evaluating LHS and RHS at alpha
         # ti(alpha), cyclo(alpha), qi are public inputs. Also ai(alpha), which will be necessary to compute ti(alpha) is a public input
 
         # Constrain the evaluation of s(alpha)
@@ -209,16 +221,21 @@ def main():
         # sanity check
         assert vi_alpha == vi.evaluate(alpha)
         
-        # Compute P1(alpha) * cyclo(alpha) inside the circuit
+        # Compute P1(alpha) * cyclo(alpha) + ti_alpha mod Zqi inside the circuit
         # TODO
-        minus_p1_times_cyclo_alpha = minus_p1_times_cyclo.evaluate(alpha)
+        p1_times_cyclo_plus_ti = p1 * cyclo + ti
+        p1_times_cyclo_plus_ti_reduced = []
+        for coeff in p1_times_cyclo_plus_ti.coefficients:
+            p1_times_cyclo_plus_ti_reduced.append(coeff % qis[i])
+        p1_times_cyclo_plus_ti_reduced = Polynomial(p1_times_cyclo_plus_ti_reduced)
+        p1_times_cyclo_plus_ti_alpha = p1_times_cyclo_plus_ti_reduced.evaluate(alpha)
 
         # Compute P2(alpha) * qi inside the circuit
         p2_alpha_times_qi = p2_alpha * qis[i]
 
-        # Assert that vi(alpha) - P1(alpha) * cyclo(alpha) = P2(alpha) * qi + ti(alpha)
-        lhs = vi_alpha + minus_p1_times_cyclo_alpha
-        rhs = p2_alpha_times_qi + ti_alpha
+        # Assert that vi(alpha) = P2(alpha) * qi + [ti(alpha) + P1(alpha) * cyclo(alpha) mod Zqi] 
+        lhs = vi_alpha 
+        rhs = p2_alpha_times_qi + p1_times_cyclo_plus_ti_alpha
         assert lhs == rhs
 
 main()
