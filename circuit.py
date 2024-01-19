@@ -79,7 +79,7 @@ def main():
         ai = adjust_negative_coefficients(Polynomial([-1]) * minus_ai, qis[i])
         si = adjust_negative_coefficients(s, qis[i])
         ei = adjust_negative_coefficients(e, qis[i])
-        k0i = adjust_negative_coefficients(Polynomial([input["k0"]]), qis[i])
+        k0i = Polynomial([input["k0"]])
         k1i = adjust_negative_coefficients(input["k1"], qis[i])
         cyclo = [1] + [0] * (n - 1) + [1]
         cyclo = Polynomial(cyclo)
@@ -110,16 +110,16 @@ def main():
 
         # Calculate P1 
         # ti = vi - P1 * cyclo mod Zqi
-        # P1 * cyclo + ti = Vi mod Zqi
-        # Vi mod Zqi / cyclo = (quotient, remainder) where quotient = P1 and the remainder = ti  
+        # P1 * cyclo + ti = vi mod Zqi
+        # vi mod Zqi / cyclo = (quotient, remainder) where quotient = P1 and the remainder = ti  
 
-        # reduce the coefficients of vi by the modulus
+        # reduce the coefficients of vi by the modulus qi
         vi_mod_zqi = []
         for coeff in vi.coefficients:
             vi_mod_zqi.append(coeff % qis[i])     
         (quotient, rem_1) = poly_div(vi_mod_zqi, cyclo.coefficients)
         p1 = Polynomial(quotient)
-        # adjust the coefficient of the remainder to be inside the field Zp
+        # adjust the coefficient of the remainder to be inside the field Zqi
         rem_adj = adjust_negative_coefficients(Polynomial(rem_1), qis[i])
         # assert that the rem_adj is equal to ti
         assert rem_adj == ti
@@ -130,7 +130,7 @@ def main():
         assert Polynomial(lhs) == rhs
 
         # assert that vi_mod_zqi = P1 * cyclo + ti mod Zqi
-        # We need to further reduce the coefficients of RHS by the modulus qi because the operation of `adjust_negative_coefficients` operated on ti does not guarantee that the coefficients are in the range [0, qi)
+        # We need to further reduce the coefficients of RHS by the modulus qi because, after the operation `adjust_negative_coefficients` operated on ti, the coefficients of rhs are no longer in the range [0, qi)
         lhs = vi_mod_zqi    
         rhs = p1 * cyclo + ti
         rhs_reduced = []
@@ -152,16 +152,27 @@ def main():
         # assert that rem_2 = rem_1 + P1 * cyclo
         lhs = Polynomial(rem_2)
         rhs = Polynomial(rem_1) + p1 * cyclo
-        # TODO: fix bug, sometimes this check fails
+        # remove leading zeros from lhs 
+        while lhs.coefficients[0] == 0:
+            lhs.coefficients.pop(0)
+        # remove leading zeros from rhs
+        while rhs.coefficients[0] == 0:
+            rhs.coefficients.pop(0)
         assert lhs == rhs
 
         # assert that rem_2 = ti + P1 * cyclo mod Zqi
-        # We need to further reduce the coefficients of RHS by the modulus qi because the operation of `adjust_negative_coefficients` operated on ti does not guarantee that the coefficients are in the range [0, qi)
+        # We need to further reduce the coefficients of RHS by the modulus qi because, after the operation of `adjust_negative_coefficients` operated on ti, the coefficients of rhs are no longer in the range [0, qi)
         lhs = Polynomial(rem_2)
         rhs = ti + p1 * cyclo
         rhs_reduced = []
         for coeff in rhs.coefficients:
             rhs_reduced.append(coeff % qis[i])
+        # remove leading zeros from lhs
+        while lhs.coefficients[0] == 0:
+            lhs.coefficients.pop(0)
+        # remove leading zeros from rhs
+        while rhs_reduced[0] == 0:
+            rhs_reduced.pop(0)
         assert lhs == Polynomial(rhs_reduced)
 
         # assert that vi mod Zp = P2 * qi + rem_2
@@ -170,7 +181,7 @@ def main():
         assert lhs == rhs
 
         # assert that vi mod Zp = P2 * qi + [ti + P1 * cyclo mod Zqi]
-        # We need to further reduce the coefficients of [ti + P1 * cyclo mod Zqi] by the modulus qi because the operation of `adjust_negative_coefficients` operated on ti does not guarantee that the coefficients are in the range [0, qi)
+        # We need to further reduce the coefficients of [ti + P1 * cyclo mod Zqi] by the modulus qi because, after the operation of `adjust_negative_coefficients` operated on ti, the coefficients of[ti + P1 * cyclo] are no longer the range [0, qi)
         lhs = vi
         rhs = ti + p1 * cyclo
         rhs_reduced = []
@@ -179,16 +190,16 @@ def main():
         rhs_reduced = Polynomial(rhs_reduced) + p2 * Polynomial([qis[i]])
         assert lhs == rhs_reduced
 
-        # Commit to phase 1 witness and fetch alpha
-        # For experiment, just generate a random alpha
-        alpha = randint(0, 100)
-
         # PHASE 1
         # Assign si as input to the circuit (private)
         # Assign ei as input to the circuit (private)
         # Assign k1i as input to the circuit (private)
         # Assign P1 as input to the circuit (private)
         # Assign P2 as input to the circuit (private)
+
+        # Commit to phase 1 witness and fetch alpha
+        # For experiment, just generate a random alpha
+        alpha = randint(0, 100)
 
         # Precomputation phase 
         # Evaluate ai(alpha), cyclo(alpha), ti(alpha)
@@ -198,12 +209,13 @@ def main():
 
         # PHASE 2
         # Assign ai(alpha) as input to the circuit (public)
-        # Assign K0i as input to the circuit (public)
+        # Assign K0 as input to the circuit (public)
         # Assign cyclo(alpha) as input to the circuit (public)
         # Assign ti(alpha) as input to the circuit (public)
+        # Assign qi as input to the circuit (public)
 
         # Prove that vi = P2 * qi + P1 * cyclo + ti mod Zp by evaluating LHS and RHS at alpha
-        # ti(alpha), cyclo(alpha), qi are public inputs. Also ai(alpha), which will be necessary to compute ti(alpha) is a public input
+        # Prove that ai * si + ei + k1i * k0 = P2 * qi + P1 * cyclo + ti mod Zp 
 
         # Constrain the evaluation of s(alpha)
         # Constrain the evaluation of e(alpha)
@@ -217,11 +229,8 @@ def main():
         p2_alpha = p2.evaluate(alpha)
 
         # Compute vi(alpha) inside the circuit
-        # vi(alpha) = ai(alpha) * s(alpha) + e(alpha) + k1i(alpha)
-        vi_alpha = ai_alpha * s_alpha + e_alpha + k1i_alpha
-
-        # sanity check
-        assert vi_alpha == vi.evaluate(alpha)
+        # vi(alpha) = ai(alpha) * s(alpha) + e(alpha) + (k1i(alpha) * k0i)
+        vi_alpha = ai_alpha * s_alpha + e_alpha + (k1i_alpha * k0i.coefficients[0])
         
         # Compute P1(alpha) * cyclo(alpha) + ti_alpha
         p1_alpha_times_cyclo_alpha_plus_ti_alpha = p1_alpha * cyclo_alpha + ti_alpha
