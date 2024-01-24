@@ -1,14 +1,13 @@
-from bfv.crt import CRTModuli
+from bfv.crt import CRTModuli, CRTPolynomial
 from bfv.bfv import BFV, RLWE
 from bfv.discrete_gauss import DiscreteGaussian
 from bfv.polynomial import Polynomial, poly_div
-from utils import SecretKeyEncrypt, adjust_negative_coefficients
+from bfv.utils import adjust_negative_coefficients
 from random import randint
 import copy
 
 
 def main():
-
     # SETUP
     # q is the ciphertext modulus, which is the product of all qis
     # t is the plaintext modulus
@@ -36,27 +35,29 @@ def main():
     n = 1024
     sigma = 3.2
     discrete_gaussian = DiscreteGaussian(sigma)
+    rlwe_q = RLWE(n, crt_moduli.q, t, discrete_gaussian)
+    rlwe_qis = []
+    for qi in crt_moduli.qis:
+        rlwe_qis.append(RLWE(n, qi, t, discrete_gaussian))
 
-    rlwe = RLWE(n, crt_moduli.q, t, discrete_gaussian)
-    bfv = BFV(rlwe)
+    bfv_rq = BFV(rlwe_q)
+    bfv_rqis = [BFV(rlwe_qi) for rlwe_qi in rlwe_qis]
 
     # s is the secret key polynomial, sampled from the ternary distribution {-1, 0, 1}
     # e is the error polynomial, sampled from the discrete Gaussian distribution
     # m is the message polynomial, sampled from the plaintext space
-    s = bfv.rlwe.SampleFromTernaryDistribution()
-    e = bfv.rlwe.SampleFromErrorDistribution()
-    m = bfv.rlwe.Rt.sample_polynomial()
+    s = bfv_rq.rlwe.SampleFromTernaryDistribution()
+    e = bfv_rq.rlwe.SampleFromErrorDistribution()
+    m = bfv_rq.rlwe.Rt.sample_polynomial()
 
     inputs = []
 
     # perform secret key encryption on m in RNS basis and extract the input for the circuit
-    for qi in qis:
-        bfv_rqi = BFV(RLWE(n, qi, t, discrete_gaussian))
+    for i in range(len(crt_moduli.qis)):
         # a is the polynomial sampled from the uniform distribution in the RNS basis
-        # TODO: add test for this
-        a = bfv_rqi.rlwe.Rq.sample_polynomial()
-        (ciphertext, k0, k1) = SecretKeyEncrypt(
-            a, s, e, m, t, crt_moduli.q, qi
+        a = bfv_rqis[i].rlwe.Rq.sample_polynomial()
+        (ciphertext, k0, k1) = bfv_rqis[i].SecretKeyEncrypt(
+            s, a, m, e, crt_moduli.q
         )
         input = {
             "ciphertext": ciphertext,
@@ -64,6 +65,25 @@ def main():
             "k1": k1,
         }
         inputs.append(input)
+
+    # Sanity check. Get the representation of the ciphertext in the Q basis and perform decryption and assert that the decryption is equal to the message polynomial
+    rqi_polynomials_ct0 = []
+    rqi_polynomials_ct1 = []
+    for input in inputs:
+        rqi_polynomials_ct0.append(input["ciphertext"][0])
+        rqi_polynomials_ct1.append(input["ciphertext"][1])
+
+    rq_polynomial_ct0 = CRTPolynomial.from_rqi_polynomials_to_rq_polynomial(
+            rqi_polynomials_ct0, n, crt_moduli)
+    
+    rq_polynomial_ct1 = CRTPolynomial.from_rqi_polynomials_to_rq_polynomial(
+            rqi_polynomials_ct1, n, crt_moduli)
+    
+    # Perform decryption on the ciphertext in the Q basis
+    dec = bfv_rq.SecretKeyDecrypt(s, (rq_polynomial_ct0, rq_polynomial_ct1), e)
+
+    # Assert that the decryption is equal to the message polynomial
+    assert dec == m
 
     # Each loop simulates a circuit in a different RNS basis
     for i, input in enumerate(inputs):

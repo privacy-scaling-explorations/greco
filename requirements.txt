@@ -1,1 +1,1 @@
-bfv @ git+https://github.com/enricobottazzi/bfv-py.git@a27022980b4bdc5d46fbafcddd40d546393aba58
+bfv @ git+https://github.com/enricobottazzi/bfv-py@ebb3e506d36320f7aabc28945437207663ab20bb
