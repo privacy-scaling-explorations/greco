@@ -114,6 +114,9 @@ def main():
         ti = input["ciphertext"][0]
         ti = adjust_negative_coefficients(ti, qis[i])
 
+        # sanity check. The coefficients of ti should be in the range [0, qi)
+        assert all(coeff in range(0, qis[i]) for coeff in ti.coefficients)
+
         # assert that vi = ti mod Rqi
         vi_clone = copy.deepcopy(vi)
         # mod Rqi means that we need to:
@@ -134,6 +137,8 @@ def main():
         # assert that the remainder is zero
         assert rem == []
         r2 = Polynomial(quotient)
+        # assert that the degree of R2 is equal to n - 2
+        assert len(r2.coefficients) - 1 == n - 2
 
         # Assert that ti - vi = R2 * cyclo mod Zqi
         lhs = ti + (Polynomial([-1]) * vi)
@@ -166,9 +171,24 @@ def main():
         # Assign si as input to the circuit (private)
         # Assign ei as input to the circuit (private)
         # Assign k1i as input to the circuit (private)
-        # Assign P1 as input to the circuit (private)
-        # Assign P2 as input to the circuit (private)
+        # Assign R1 as input to the circuit (private)
+        # Assign R2 as input to the circuit (private)
 
+        # TODO: add range check for private inputs
+        # Perform range check on si, ei, k1i, r1, r2
+
+        # si is in [0, 1, qi - 1]
+        assert all(coeff in [0, 1, qis[i] - 1] for coeff in si.coefficients)
+
+        # ei is in [0, B] or [qi - B, qi) where B is the upper bound of the discrete Gaussian distribution
+        b = int(discrete_gaussian.z_upper)
+        for coeff in ei.coefficients:
+            assert coeff in range(0, b + 1) or coeff in range(qis[i] - b, qis[i])
+
+        # k1i is in [0, (t - 1)/2] or (qi - (t - 1)/2, qi) where t is the plaintext modulus
+        for coeff in k1i.coefficients:
+            assert coeff in range(0, ((t - 1) // 2) + 1) or coeff in range((qis[i] - ((t - 1) // 2)) + 1, qis[i])
+            
         # Commit to phase 1 witness and fetch alpha
         # For experiment, just generate a random alpha
         alpha = randint(0, 100)
@@ -211,5 +231,4 @@ def main():
         rhs = vi_alpha + (r1_alpha * qis[i]) + (r2_alpha * cyclo_alpha)
         assert lhs == rhs
     
-        # TODO: add range check for private inputs
 main()
