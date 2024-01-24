@@ -200,13 +200,9 @@ def main():
         # sanity check
         assert vi_alpha == vi.evaluate(alpha)
 
-        # Compute ti(alpha) - vi(alpha) - R2(alpha) * cyclo(alpha) inside the circuit
-        lhs = ti_alpha - vi_alpha - r2_alpha * cyclo_alpha
-
-        # Compute R1(alpha) * qi inside the circuit
-        rhs = r1_alpha * qis[i]
-
-        # Assert that lhs = rhs
+        # Assert that ti = vi + r1 * qi + r2 * cyclo mod Zp
+        lhs = ti_alpha
+        rhs = vi_alpha + (r1_alpha * qis[i]) + (r2_alpha * cyclo_alpha)
         assert lhs == rhs
     
         # TODO: add range check for private inputs
