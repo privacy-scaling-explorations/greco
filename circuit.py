@@ -150,10 +150,16 @@ def main():
         assert rem == []
         r1 = Polynomial(quotient)
 
-        # Assert that ti - vi - R2 * cyclo = R1 * qi mod Zp
-        # ti = vi + R2 * cyclo + R1 * qi
-        lhs = ti + (Polynomial([-1]) * vi) + Polynomial([-1]) * (r2 * cyclo)
-        rhs = r1 * Polynomial([qis[i]])
+        # Assert that ti = vi + r1 * qi + r2 * cyclo mod Zp
+        lhs = ti
+        rhs = vi + (r1 * Polynomial([qis[i]])) + (r2 * cyclo)
+
+        # remove the leading zeroes from the rhs 
+        for j in range(len(rhs.coefficients)):
+            if rhs.coefficients[j] != 0:
+                rhs.coefficients = rhs.coefficients[j:]
+                break
+
         assert lhs == rhs
 
         # PHASE 1
