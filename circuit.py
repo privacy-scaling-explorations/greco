@@ -166,9 +166,10 @@ def main():
         CIRCUIT - PHASE 1 - ASSIGNMENT PHASE
 
         In this phase, the private inputs are assigned to the circuit. These are the polynomials si, ei, k1i, R1, R2. 
+        We also assign the public inputs qi, t, k0i and b. N is a constant of the circuit.
         '''
 
-        # ... Perform input assignment here ...
+        # ... Perform assignment here and expose public inputs...
 
         '''
         CIRCUIT - PHASE 1 - RANGE CHECK OF PRIVATE POLYNOMIALS 
@@ -178,11 +179,11 @@ def main():
 
         # ... Perform range check here ...
 
-        # sanity check. The coefficients of ti should be in the range [-(q-1)/2, (q-1)/2]
+        # sanity check. The coefficients of ti should be in the range [-(qi-1)/2, (qi-1)/2]
         bound = ((qis[i] - 1) / 2)
         assert all(coeff >= -bound and coeff <= bound for coeff in ti.coefficients)
 
-        # sanity check. The coefficients of ai should be in the range [-(q-1)/2, (q-1)/2]
+        # sanity check. The coefficients of ai should be in the range [-(qi-1)/2, (qi-1)/2]
         bound = ((qis[i] - 1) / 2)
         assert all(coeff >= -bound and coeff <= bound for coeff in ai.coefficients)
 
@@ -203,11 +204,11 @@ def main():
         res = ai * si + ei
         assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
 
-        # constraint. The coefficients of R2 should be in the range [-(q-1)/2, (q-1)/2]
+        # constraint. The coefficients of R2 should be in the range [-(qi-1)/2, (qi-1)/2]
         bound = ((qis[i] - 1) / 2)
         assert all(coeff >= -bound and coeff <= bound for coeff in r2.coefficients)
 
-        # sanity check. The coefficients of R2 * cyclo should be in the range [-(q-1)/2, (q-1)/2]
+        # sanity check. The coefficients of R2 * cyclo should be in the range [-(qi-1)/2, (qi-1)/2]
         bound = ((qis[i] - 1) / 2)
         res = r2 * cyclo
         assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
@@ -250,8 +251,7 @@ def main():
 
         '''
         CIRCUIT - PHASE 2 - ASSIGNMENT PHASE
-
-        The public inputs are assigned to the circuit. These are the polynomials ai, cyclo, ti evaluated at alpha, k0 and qi.
+        The public inputs are assigned to the circuit. These are the polynomials ai, cyclo, ti evaluated at alpha.
         '''
 
         # The evaluation of ai_alpha, cyclo_alpha, ti_alpha is performed outside the circuit
@@ -259,7 +259,7 @@ def main():
         cyclo_alpha = cyclo.evaluate(alpha)
         ti_alpha = ti.evaluate(alpha)
 
-        # ... Perform input assignment here and expose inputs to the public ...
+        # ... Perform assignment here and expose expose public inputs ...
 
         '''
         CIRCUIT - PHASE 2 - CORRECT ENCRIPTION CONSTRAINT
