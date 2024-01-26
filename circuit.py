@@ -2,17 +2,23 @@ from bfv.crt import CRTModuli, CRTPolynomial
 from bfv.bfv import BFV, RLWE
 from bfv.discrete_gauss import DiscreteGaussian
 from bfv.polynomial import Polynomial, poly_div
-from bfv.utils import adjust_negative_coefficients
 from random import randint
 import copy
 
 def main(): 
+    
+    '''
+    ENCRYPTION PHASE - performed outside the circuit
 
-    # SETUP
-    # q is the ciphertext modulus, which is the product of all qis
-    # t is the plaintext modulus
-    # n is the degree of the cyclotomic polynomial which is the denominator of the polynomial ring
-    # sigma is the standard deviation of the discrete Gaussian distribution
+    - `qis` are the small moduli used in the CRT basis, which product is the ciphertext modulus q
+    - `t` is the plaintext modulus
+    - `n` is the degree of the cyclotomic polynomial which is the denominator of the polynomial ring
+    - `sigma` is the standard deviation of the discrete Gaussian distribution
+    - `s` is the secret key polynomial, sampled from the ternary distribution {-1, 0, 1}
+    - `e` is the error polynomial, sampled from the discrete Gaussian distribution
+    - `m` is the message polynomial, sampled from the plaintext space
+    '''
+
     qis = [
         1152921504606584833,
         1152921504598720513,
@@ -40,21 +46,20 @@ def main():
     for qi in crt_moduli.qis:
         rlwe_qis.append(RLWE(n, qi, t, discrete_gaussian))
 
+    # Create a BFV instance for the ciphertext modulus q and a list of BFV instances for each small moduli qis
     bfv_rq = BFV(rlwe_q)
     bfv_rqis = [BFV(rlwe_qi) for rlwe_qi in rlwe_qis]
 
-    # s is the secret key polynomial, sampled from the ternary distribution {-1, 0, 1}
-    # e is the error polynomial, sampled from the discrete Gaussian distribution
-    # m is the message polynomial, sampled from the plaintext space
     s = bfv_rq.rlwe.SampleFromTernaryDistribution()
     e = bfv_rq.rlwe.SampleFromErrorDistribution()
     m = bfv_rq.rlwe.Rt.sample_polynomial()
 
     inputs = []
 
-    # perform secret key encryption on m in RNS basis and extract the input for the circuit
+    # Perform encryption of m in each CRT basis
     for i in range(len(crt_moduli.qis)):
-        # a is the polynomial sampled from the uniform distribution in the RNS basis
+
+        # a is a polynomial sampled from the uniform distribution Rqi
         a = bfv_rqis[i].rlwe.Rq.sample_polynomial()
         (ciphertext, k0, k1) = bfv_rqis[i].SecretKeyEncrypt(
             s, a, m, e, crt_moduli.q
@@ -66,56 +71,48 @@ def main():
         }
         inputs.append(input)
 
-    # Sanity check. Get the representation of the ciphertext in the Q basis and perform decryption and assert that the decryption is equal to the message polynomial
-    rqi_polynomials_ct0 = []
-    rqi_polynomials_ct1 = []
+    # Sanity check. Get the representation of the ciphertext in the Q basis and perform decryption and check if the decryption is equal to `m`
+    rqi_ct0_polynomials = []
+    rqi_ct1_polynomial = []
     for input in inputs:
-        rqi_polynomials_ct0.append(input["ciphertext"][0])
-        rqi_polynomials_ct1.append(input["ciphertext"][1])
+        rqi_ct0_polynomials.append(input["ciphertext"][0])
+        rqi_ct1_polynomial.append(input["ciphertext"][1])
 
-    rq_polynomial_ct0 = CRTPolynomial.from_rqi_polynomials_to_rq_polynomial(
-            rqi_polynomials_ct0, n, crt_moduli)
+    rq_ct0_polynomial = CRTPolynomial.from_rqi_polynomials_to_rq_polynomial(
+            rqi_ct0_polynomials, n, crt_moduli)
     
-    rq_polynomial_ct1 = CRTPolynomial.from_rqi_polynomials_to_rq_polynomial(
-            rqi_polynomials_ct1, n, crt_moduli)
+    rq_ct1_polynomial = CRTPolynomial.from_rqi_polynomials_to_rq_polynomial(
+            rqi_ct1_polynomial, n, crt_moduli)
+    
+    rq_ciphertext_recovered = (rq_ct0_polynomial, rq_ct1_polynomial)
     
     # Perform decryption on the ciphertext in the Q basis
-    dec = bfv_rq.SecretKeyDecrypt(s, (rq_polynomial_ct0, rq_polynomial_ct1), e)
+    dec = bfv_rq.SecretKeyDecrypt(s, rq_ciphertext_recovered, e)
 
-    # Assert that the decryption is equal to the message polynomial
     assert dec == m
 
-    # Each loop simulates a circuit in a different RNS basis
+    # Each round of the loop simulates a proof generation phase for a different CRT basis
     for i, input in enumerate(inputs):
 
-        # PRECOMPUTATION PHASE - performed outside the circuit
+        '''
+        SETUP PHASE - performed outside the circuit
 
-        # The polynomials have now coefficients in the range (-qi/2, qi/2]
-        # the circuit works with field elements in Zp, where p is the prime field of the circuit
-        # In order to express the polynomials in Zp, we represent the coefficients in the range [0, qi).
-        # Every coefficient in the range [0, qi/2] is normally represented in the range [0, qi/2], 
-        # Every coefficient in the range (-qi/2, 0) is represented in the range (qi/2, qi) using the `adjust_negative_coefficients` function
-        minus_ai = input["ciphertext"][1]
-        ai = adjust_negative_coefficients(Polynomial([-1]) * minus_ai, qis[i])
-        si = adjust_negative_coefficients(s, qis[i])
-        ei = adjust_negative_coefficients(e, qis[i])
+        For each CRT basis, we need to compute the polynomials R1 and R2 (check this doc for more details: https://hackmd.io/@gaussian/HJ8DYyjPp)
+        '''
+
+        ai = Polynomial([-1]) * input["ciphertext"][1]
+        si = s
+        ei = e
         k0i = Polynomial([input["k0"]])
-        k1i = adjust_negative_coefficients(input["k1"], qis[i])
+        k1i = input["k1"]
         cyclo = [1] + [0] * (n - 1) + [1]
         cyclo = Polynomial(cyclo)
 
-        # ai * si + ei + ki = vi (this is ct0 before reduction)
-        vi_part1 = ai * si
-        vi_part2 = ei
-        vi_part3 = k0i * k1i
-        vi = vi_part1 + vi_part2 + vi_part3
+        # ai * si + ei + ki = vi (this is ct0 before reduction in the Rqi ring)
+        vi = ai * si + ei + k0i * k1i
 
-        # ai * si + ei + ki = ti mod Rqi
+        # ai * si + ei + ki = ti mod Rqi = ct0
         ti = input["ciphertext"][0]
-        ti = adjust_negative_coefficients(ti, qis[i])
-
-        # sanity check. The coefficients of ti should be in the range [0, qi)
-        assert all(coeff in range(0, qis[i]) for coeff in ti.coefficients)
 
         # assert that vi = ti mod Rqi
         vi_clone = copy.deepcopy(vi)
@@ -123,15 +120,13 @@ def main():
         # - reduce the coefficients of vi_clone by the cyclotomic polynomial
         # - reduce the coefficients of vi_clone by the modulus
         vi_clone.reduce_coefficients_by_cyclo(cyclo.coefficients)
-        vi_clone_reduced = [] 
-        for coeff in vi_clone.coefficients:
-            vi_clone_reduced.append(coeff % qis[i])
-        assert Polynomial(vi_clone_reduced) == ti
+        vi_clone.reduce_coefficients_by_modulus(qis[i])
+        assert vi_clone == ti
 
         # Calculate R2
         # divide ti - vi by the cyclotomic polynomial over Zqi to get R2
         num = ti + (Polynomial([-1]) * vi)
-        # reduce the coefficients of num by the modulus qi
+        # reduce the coefficients of num by the modulus qi 
         num.reduce_coefficients_by_modulus(qis[i])
         (quotient, rem) = poly_div(num.coefficients, cyclo.coefficients)
         # assert that the remainder is zero
@@ -145,7 +140,7 @@ def main():
         rhs = r2 * cyclo
         # reduce the coefficients of lhs by the modulus qi
         lhs.reduce_coefficients_by_modulus(qis[i])
-        assert lhs == rhs
+        assert lhs == rhs 
         
         # Calculate R1
         # divide ti - vi - R2 * cyclo by the modulus qi to get R1
@@ -167,68 +162,120 @@ def main():
 
         assert lhs == rhs
 
-        # PHASE 1
-        # Assign si as input to the circuit (private)
-        # Assign ei as input to the circuit (private)
-        # Assign k1i as input to the circuit (private)
-        # Assign R1 as input to the circuit (private)
-        # Assign R2 as input to the circuit (private)
+        '''
+        CIRCUIT - PHASE 1 - ASSIGNMENT PHASE
 
-        # TODO: add range check for private inputs
-        # Perform range check on si, ei, k1i, r1, r2
+        In this phase, the private inputs are assigned to the circuit. These are the polynomials si, ei, k1i, R1, R2. 
+        '''
 
-        # si is in [0, 1, qi - 1]
-        assert all(coeff in [0, 1, qis[i] - 1] for coeff in si.coefficients)
+        # ... Perform input assignment here ...
 
-        # ei is in [0, B] or [qi - B, qi) where B is the upper bound of the discrete Gaussian distribution
+        '''
+        CIRCUIT - PHASE 1 - RANGE CHECK OF PRIVATE POLYNOMIALS 
+
+        In this phase, the coefficients of the private polynomials are checked to be in the correct range.
+        '''
+
+        # ... Perform range check here ...
+
+        # sanity check. The coefficients of ti should be in the range [-(q-1)/2, (q-1)/2]
+        bound = ((qis[i] - 1) / 2)
+        assert all(coeff >= -bound and coeff <= bound for coeff in ti.coefficients)
+
+        # sanity check. The coefficients of ai should be in the range [-(q-1)/2, (q-1)/2]
+        bound = ((qis[i] - 1) / 2)
+        assert all(coeff >= -bound and coeff <= bound for coeff in ai.coefficients)
+
+        # constraint. The coefficients of si should be in the range [-1, 0, 1]
+        assert all(coeff in [-1, 0, 1] for coeff in si.coefficients)
+
+        # sanity check. The coefficients of ai * si should be in the range $[-N \cdot \frac{q_i - 1}{2}, N \cdot \frac{q_i - 1}{2}]$
+        bound = ((qis[i] - 1) / 2) * n
+        res = ai * si
+        assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
+
+        # constraint. The coefficients of ei should be in the range [-B, B] where B is the upper bound of the discrete Gaussian distribution
         b = int(discrete_gaussian.z_upper)
-        for coeff in ei.coefficients:
-            assert coeff in range(0, b + 1) or coeff in range(qis[i] - b, qis[i])
+        assert all(coeff >= -b and coeff <= b for coeff in ei.coefficients)
 
-        # k1i is in [0, (t - 1)/2] or (qi - (t - 1)/2, qi) where t is the plaintext modulus
-        for coeff in k1i.coefficients:
-            assert coeff in range(0, ((t - 1) // 2) + 1) or coeff in range((qis[i] - ((t - 1) // 2)) + 1, qis[i])
-            
-        # Commit to phase 1 witness and fetch alpha
-        # For experiment, just generate a random alpha
-        alpha = randint(0, 100)
+        # sanity check. The coefficients of ai * si + ei should be in the range $- (N \cdot \frac{q_i - 1}{2} + B), N \cdot \frac{q_i - 1}{2} + B]$
+        bound = ((qis[i] - 1) / 2) * n + b
+        res = ai * si + ei
+        assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
 
-        # Precomputation phase 
-        # Evaluate ai(alpha), cyclo(alpha), ti(alpha)
+        # constraint. The coefficients of R2 should be in the range [-(q-1)/2, (q-1)/2]
+        bound = ((qis[i] - 1) / 2)
+        assert all(coeff >= -bound and coeff <= bound for coeff in r2.coefficients)
+
+        # sanity check. The coefficients of R2 * cyclo should be in the range [-(q-1)/2, (q-1)/2]
+        bound = ((qis[i] - 1) / 2)
+        res = r2 * cyclo
+        assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
+
+        # constraint. The coefficients of k1i should be in the range [-(t-1)/2, (t-1)/2]
+        bound = ((t - 1) / 2)
+        assert all(coeff >= -bound and coeff <= bound for coeff in k1i.coefficients)
+
+        # sanity check. The coefficients of k1i * k0i should be in the range $[-\frac{t - 1}{2} \cdot |K_i^{0}|, \frac{t - 1}{2} \cdot |K_i^{0}|]$
+        bound = ((t - 1) / 2) * abs(k0i.coefficients[0])
+        res = k1i * k0i
+        assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
+
+        # sanity check. The coefficients of vi (ai * si + ei + k1i * k0i) should be in the range $[- (N \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|), N \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|]$
+        bound = ((qis[i] - 1) / 2) * n + b + ((t - 1) / 2) * abs(k0i.coefficients[0])
+        assert all(coeff >= -bound and coeff <= bound for coeff in vi.coefficients)
+
+        # sanity check. The coefficients of ti - vi should be in the range $ [- ((N+1) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|), (N+1) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|]$
+        bound = ((qis[i] - 1) / 2) * (n + 1) + b + ((t - 1) / 2) * abs(k0i.coefficients[0])
+        sub = ti + (Polynomial([-1]) * vi)
+        assert all(coeff >= -bound and coeff <= bound for coeff in sub.coefficients)
+
+        # sanity check. The coefficients of ti - vi - R2 * cyclo should be in the range $[- ((N+2) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|), (N+2) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|]$
+        bound = ((qis[i] - 1) / 2) * (n + 2) + b + ((t - 1) / 2) * abs(k0i.coefficients[0])
+        sub = ti + (Polynomial([-1]) * vi) + Polynomial([-1]) * (r2 * cyclo)
+        assert all(coeff >= -bound and coeff <= bound for coeff in sub.coefficients)
+
+        # constraint. The coefficients of (ti - vi - R2 * cyclo) / qi = R1 should be in the range $[\frac{- ((N+2) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|)}{q_i}, \frac{(N+2) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|}{q_i}]$
+        bound = (((qis[i] - 1) / 2) * (n + 2) + b + ((t - 1) / 2) * abs(k0i.coefficients[0])) / qis[i]
+        assert all(coeff >= -bound and coeff <= bound for coeff in r1.coefficients)
+
+        '''
+        CIRCUIT - END OF PHASE 1 - WITNESS COMMITMENT 
+
+        At the end of phase 1, the witness is committed and a challenge is generated using the Fiat-Shamir heuristic.
+        '''
+
+        # For the sake of simplicity, we generate a random challenge here
+        alpha = randint(0, 1000)
+
+        '''
+        CIRCUIT - PHASE 2 - ASSIGNMENT PHASE
+
+        The public inputs are assigned to the circuit. These are the polynomials ai, cyclo, ti evaluated at alpha, k0 and qi.
+        '''
+
+        # The evaluation of ai_alpha, cyclo_alpha, ti_alpha is performed outside the circuit
         ai_alpha = ai.evaluate(alpha)
         cyclo_alpha = cyclo.evaluate(alpha)
         ti_alpha = ti.evaluate(alpha)
 
-        # PHASE 2
-        # Assign ai(alpha) as input to the circuit (public)
-        # Assign K0 as input to the circuit (public)
-        # Assign cyclo(alpha) as input to the circuit (public)
-        # Assign ti(alpha) as input to the circuit (public)
-        # Assign qi as input to the circuit (public)
+        # ... Perform input assignment here and expose inputs to the public ...
 
-        # Prove that ti - vi - R2 * cyclo = R1 * qi mod Zp by evaluating LHS and RHS at alpha
+        '''
+        CIRCUIT - PHASE 2 - CORRECT ENCRIPTION CONSTRAINT
 
-        # Constrain the evaluation of s(alpha)
-        # Constrain the evaluation of e(alpha)
-        # Constrain the evaluation of k1i(alpha)
-        # Constrain the evaluation of R1(alpha)
-        # Constrain the evaluation of R2(alpha)
+        We need to prove that ti = vi + r1 * qi + r2 * cyclo mod Zp.
+        We do that by proving that LHS(alpha) = RHS(alpha) for a random alpha according to Scwhartz-Zippel lemma.
+        '''
+
         s_alpha = si.evaluate(alpha)
         e_alpha = ei.evaluate(alpha)
         k1i_alpha = k1i.evaluate(alpha)
         r1_alpha = r1.evaluate(alpha)
         r2_alpha = r2.evaluate(alpha)
 
-        # Compute vi(alpha) inside the circuit
-        # vi(alpha) = ai(alpha) * s(alpha) + e(alpha) + (k1i(alpha) * k0i)
-        vi_alpha = ai_alpha * s_alpha + e_alpha + (k1i_alpha * k0i.coefficients[0])
-
-        # sanity check
-        assert vi_alpha == vi.evaluate(alpha)
-
-        # Assert that ti = vi + r1 * qi + r2 * cyclo mod Zp
         lhs = ti_alpha
-        rhs = vi_alpha + (r1_alpha * qis[i]) + (r2_alpha * cyclo_alpha)
+        rhs = ai_alpha * s_alpha + e_alpha + (k1i_alpha * k0i.coefficients[0]) + (r1_alpha * qis[i]) + (r2_alpha * cyclo_alpha)
         assert lhs == rhs
-    
+
 main()
