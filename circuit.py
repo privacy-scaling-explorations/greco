@@ -171,6 +171,15 @@ def main():
 
         # ... Perform assignment here and expose public inputs...
 
+        p = 21888242871839275222246405745257275088548364400416034343698204186575808495617
+
+        # Every assigned value must be an element of the field Zp. Negative values `-z` are assigned as `p - z`
+        si_assigned = assign_to_circuit(si, p)
+        ei_assigned = assign_to_circuit(ei, p)
+        k1i_assigned = assign_to_circuit(k1i, p)
+        r1_assigned = assign_to_circuit(r1, p)
+        r2_assigned = assign_to_circuit(r2, p)
+
         '''
         CIRCUIT - PHASE 1 - RANGE CHECK OF PRIVATE POLYNOMIALS 
 
@@ -189,7 +198,12 @@ def main():
 
         # constraint. The coefficients of si should be in the range [-1, 0, 1]
         assert all(coeff in [-1, 0, 1] for coeff in si.coefficients)
-
+        # After the circuit assignement, the coefficients of si_assigned must be in [0, 1, p - 1]
+        assert all(coeff in [0, 1, p - 1] for coeff in si_assigned.coefficients)
+        # To perform a range check with a smaller lookup table, we normalize the coefficients of si_assigned to be in [0, 1, 2] (the normalization is constrained inside the circuit)
+        si_normalized = Polynomial([(coeff + 1) % p for coeff in si_assigned.coefficients])
+        assert all(coeff in [0, 1, 2] for coeff in si_normalized.coefficients)
+        
         # sanity check. The coefficients of ai * si should be in the range $[-N \cdot \frac{q_i - 1}{2}, N \cdot \frac{q_i - 1}{2}]$
         bound = ((qis[i] - 1) / 2) * n
         res = ai * si
@@ -198,6 +212,11 @@ def main():
         # constraint. The coefficients of ei should be in the range [-B, B] where B is the upper bound of the discrete Gaussian distribution
         b = int(discrete_gaussian.z_upper)
         assert all(coeff >= -b and coeff <= b for coeff in ei.coefficients)
+        # After the circuit assignement, the coefficients of ei_assigned must be in [0, B] or [p - B, p - 1] (the normalization is constrained inside the circuit)
+        assert all(coeff in range(0, b+1) or coeff in range(p - b, p) for coeff in ei_assigned.coefficients)
+        # To perform a range check with a smaller lookup table, we normalize the coefficients of ei_assigned to be in [0, 2B]
+        ei_normalized = Polynomial([(coeff + b) % p for coeff in ei_assigned.coefficients])
+        assert all(coeff >= 0 and coeff <= 2*b for coeff in ei_normalized.coefficients)
 
         # sanity check. The coefficients of ai * si + ei should be in the range $- (N \cdot \frac{q_i - 1}{2} + B), N \cdot \frac{q_i - 1}{2} + B]$
         bound = ((qis[i] - 1) / 2) * n + b
@@ -207,6 +226,11 @@ def main():
         # constraint. The coefficients of R2 should be in the range [-(qi-1)/2, (qi-1)/2]
         bound = ((qis[i] - 1) / 2)
         assert all(coeff >= -bound and coeff <= bound for coeff in r2.coefficients)
+        # After the circuit assignement, the coefficients of r2_assigned must be in [0, bound] or [p - bound, p - 1] (the normalization is constrained inside the circuit)
+        assert all(coeff in range(0, int(bound) + 1) or coeff in range(p - int(bound), p) for coeff in r2_assigned.coefficients)
+        # To perform a range check with a smaller lookup table, we normalize the coefficients of r2_assigned to be in [0, 2*bound]
+        r2_normalized = Polynomial([(coeff + int(bound)) % p for coeff in r2_assigned.coefficients])
+        assert all(coeff >= 0 and coeff <= 2*bound for coeff in r2_normalized.coefficients)
 
         # sanity check. The coefficients of R2 * cyclo should be in the range [-(qi-1)/2, (qi-1)/2]
         bound = ((qis[i] - 1) / 2)
@@ -216,6 +240,11 @@ def main():
         # constraint. The coefficients of k1i should be in the range [-(t-1)/2, (t-1)/2]
         bound = ((t - 1) / 2)
         assert all(coeff >= -bound and coeff <= bound for coeff in k1i.coefficients)
+        # After the circuit assignement, the coefficients of k1i_assigned must be in [0, bound] or [p - bound, p - 1] (the normalization is constrained inside the circuit)
+        assert all(coeff in range(0, int(bound) + 1) or coeff in range(p - int(bound), p) for coeff in k1i_assigned.coefficients)
+        # To perform a range check with a smaller lookup table, we normalize the coefficients of k1i_assigned to be in [0, 2*bound]
+        k1i_normalized = Polynomial([(coeff + int(bound)) % p for coeff in k1i_assigned.coefficients])
+        assert all(coeff >= 0 and coeff <= 2*bound for coeff in k1i_normalized.coefficients)
 
         # sanity check. The coefficients of k1i * k0i should be in the range $[-\frac{t - 1}{2} \cdot |K_i^{0}|, \frac{t - 1}{2} \cdot |K_i^{0}|]$
         bound = ((t - 1) / 2) * abs(k0i.coefficients[0])
@@ -239,6 +268,11 @@ def main():
         # constraint. The coefficients of (ti - vi - R2 * cyclo) / qi = R1 should be in the range $[\frac{- ((N+2) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|)}{q_i}, \frac{(N+2) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|}{q_i}]$
         bound = (((qis[i] - 1) / 2) * (n + 2) + b + ((t - 1) / 2) * abs(k0i.coefficients[0])) / qis[i]
         assert all(coeff >= -bound and coeff <= bound for coeff in r1.coefficients)
+        # After the circuit assignement, the coefficients of r1_assigned must be in [0, bound] or [p - bound, p - 1]
+        assert all(coeff in range(0, int(bound) + 1) or coeff in range(p - int(bound), p) for coeff in r1_assigned.coefficients)
+        # To perform a range check with a smaller lookup table, we normalize the coefficients of r1_assigned to be in [0, 2*bound]
+        r1_normalized = Polynomial([(coeff + int(bound)) % p for coeff in r1_assigned.coefficients])
+        assert all(coeff >= 0 and coeff <= 2*bound for coeff in r1_normalized.coefficients)
 
         '''
         CIRCUIT - END OF PHASE 1 - WITNESS COMMITMENT 
@@ -255,7 +289,7 @@ def main():
         '''
 
         # The evaluation of ai_alpha, cyclo_alpha, ti_alpha is performed outside the circuit
-        ai_alpha = ai.evaluate(alpha)
+        ai_alpha = ai.evaluate(alpha) 
         cyclo_alpha = cyclo.evaluate(alpha)
         ti_alpha = ti.evaluate(alpha)
 
@@ -268,14 +302,31 @@ def main():
         We do that by proving that LHS(alpha) = RHS(alpha) for a random alpha according to Scwhartz-Zippel lemma.
         '''
 
-        s_alpha = si.evaluate(alpha)
-        e_alpha = ei.evaluate(alpha)
-        k1i_alpha = k1i.evaluate(alpha)
-        r1_alpha = r1.evaluate(alpha)
-        r2_alpha = r2.evaluate(alpha)
+        s_alpha = si_assigned.evaluate(alpha)
+        e_alpha = ei_assigned.evaluate(alpha)
+        k1i_alpha = k1i_assigned.evaluate(alpha)
+        r1_alpha = r1_assigned.evaluate(alpha)
+        r2_alpha = r2_assigned.evaluate(alpha)
 
-        lhs = ti_alpha
-        rhs = ai_alpha * s_alpha + e_alpha + (k1i_alpha * k0i.coefficients[0]) + (r1_alpha * qis[i]) + (r2_alpha * cyclo_alpha)
-        assert lhs == rhs
+        lhs = ti_alpha 
+        rhs = (ai_alpha * s_alpha + e_alpha + (k1i_alpha * k0i.coefficients[0]) + (r1_alpha * qis[i]) + (r2_alpha * cyclo_alpha))
+
+        assert lhs % p == rhs % p
+
+def assign_to_circuit(poly: Polynomial, p: int) -> Polynomial:
+    '''
+    This function takes a polynomial and returns its coefficients in the field Zp
+    `poly` is the polynomial to be assigned to the circuit
+    `p` is the field modulus
+    '''
+    assigned_coefficients = []
+    for coeff in poly.coefficients:
+        if coeff < 0:
+            coeff = coeff % p
+        if coeff > p:
+            coeff = coeff % p
+        assigned_coefficients.append(coeff)
+
+    return Polynomial(assigned_coefficients)
 
 main()
