@@ -110,6 +110,7 @@ def main():
 
         # ai * si + ei + ki = vi (this is ct0 before reduction in the Rqi ring)
         vi = ai * si + ei + k0i * k1i
+        assert(len(vi.coefficients) - 1 == 2 * n - 2)
 
         # ai * si + ei + ki = ti mod Rqi = ct0
         ti = input["ciphertext"][0]
@@ -189,11 +190,11 @@ def main():
         # ... Perform range check here ...
 
         # sanity check. The coefficients of ti should be in the range [-(qi-1)/2, (qi-1)/2]
-        bound = ((qis[i] - 1) / 2)
+        bound = int((qis[i] - 1) / 2)
         assert all(coeff >= -bound and coeff <= bound for coeff in ti.coefficients)
 
         # sanity check. The coefficients of ai should be in the range [-(qi-1)/2, (qi-1)/2]
-        bound = ((qis[i] - 1) / 2)
+        bound = int((qis[i] - 1) / 2)
         assert all(coeff >= -bound and coeff <= bound for coeff in ai.coefficients)
 
         # constraint. The coefficients of si should be in the range [-1, 0, 1]
@@ -205,7 +206,7 @@ def main():
         assert all(coeff in [0, 1, 2] for coeff in si_normalized.coefficients)
         
         # sanity check. The coefficients of ai * si should be in the range $[-N \cdot \frac{q_i - 1}{2}, N \cdot \frac{q_i - 1}{2}]$
-        bound = ((qis[i] - 1) / 2) * n
+        bound = int((qis[i] - 1) / 2) * n
         res = ai * si
         assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
 
@@ -219,12 +220,12 @@ def main():
         assert all(coeff >= 0 and coeff <= 2*b for coeff in ei_normalized.coefficients)
 
         # sanity check. The coefficients of ai * si + ei should be in the range $- (N \cdot \frac{q_i - 1}{2} + B), N \cdot \frac{q_i - 1}{2} + B]$
-        bound = ((qis[i] - 1) / 2) * n + b
+        bound = int((qis[i] - 1) / 2) * n + b
         res = ai * si + ei
         assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
 
         # constraint. The coefficients of R2 should be in the range [-(qi-1)/2, (qi-1)/2]
-        bound = ((qis[i] - 1) / 2)
+        bound = int((qis[i] - 1) / 2)
         assert all(coeff >= -bound and coeff <= bound for coeff in r2.coefficients)
         # After the circuit assignement, the coefficients of r2_assigned must be in [0, bound] or [p - bound, p - 1] (the normalization is constrained inside the circuit)
         assert all(coeff in range(0, int(bound) + 1) or coeff in range(p - int(bound), p) for coeff in r2_assigned.coefficients)
@@ -233,12 +234,12 @@ def main():
         assert all(coeff >= 0 and coeff <= 2*bound for coeff in r2_normalized.coefficients)
 
         # sanity check. The coefficients of R2 * cyclo should be in the range [-(qi-1)/2, (qi-1)/2]
-        bound = ((qis[i] - 1) / 2)
+        bound = int((qis[i] - 1) / 2)
         res = r2 * cyclo
         assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
 
         # constraint. The coefficients of k1i should be in the range [-(t-1)/2, (t-1)/2]
-        bound = ((t - 1) / 2)
+        bound = int((t - 1) / 2)
         assert all(coeff >= -bound and coeff <= bound for coeff in k1i.coefficients)
         # After the circuit assignement, the coefficients of k1i_assigned must be in [0, bound] or [p - bound, p - 1] (the normalization is constrained inside the circuit)
         assert all(coeff in range(0, int(bound) + 1) or coeff in range(p - int(bound), p) for coeff in k1i_assigned.coefficients)
@@ -247,16 +248,16 @@ def main():
         assert all(coeff >= 0 and coeff <= 2*bound for coeff in k1i_normalized.coefficients)
 
         # sanity check. The coefficients of k1i * k0i should be in the range $[-\frac{t - 1}{2} \cdot |K_i^{0}|, \frac{t - 1}{2} \cdot |K_i^{0}|]$
-        bound = ((t - 1) / 2) * abs(k0i.coefficients[0])
+        bound = int((t - 1) / 2) * abs(k0i.coefficients[0])
         res = k1i * k0i
         assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
 
         # sanity check. The coefficients of vi (ai * si + ei + k1i * k0i) should be in the range $[- (N \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|), N \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|]$
-        bound = ((qis[i] - 1) / 2) * n + b + ((t - 1) / 2) * abs(k0i.coefficients[0])
+        bound = int((qis[i] - 1) / 2) * n + b + int((t - 1) / 2) * abs(k0i.coefficients[0])
         assert all(coeff >= -bound and coeff <= bound for coeff in vi.coefficients)
 
         # sanity check. The coefficients of ti - vi should be in the range $ [- ((N+1) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|), (N+1) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|]$
-        bound = ((qis[i] - 1) / 2) * (n + 1) + b + ((t - 1) / 2) * abs(k0i.coefficients[0])
+        bound = int((qis[i] - 1) / 2) * (n + 1) + b + int((t - 1) / 2) * abs(k0i.coefficients[0])
         sub = ti + (Polynomial([-1]) * vi)
         assert all(coeff >= -bound and coeff <= bound for coeff in sub.coefficients)
 
@@ -266,13 +267,21 @@ def main():
         assert all(coeff >= -bound and coeff <= bound for coeff in sub.coefficients)
 
         # constraint. The coefficients of (ti - vi - R2 * cyclo) / qi = R1 should be in the range $[\frac{- ((N+2) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|)}{q_i}, \frac{(N+2) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|}{q_i}]$
-        bound = (((qis[i] - 1) / 2) * (n + 2) + b + ((t - 1) / 2) * abs(k0i.coefficients[0])) / qis[i]
+        bound = (int((qis[i] - 1) / 2) * (n + 2) + b + int((t - 1) / 2) * abs(k0i.coefficients[0])) / qis[i]
+        # round bound to the nearest integer
+        bound = int(bound)
         assert all(coeff >= -bound and coeff <= bound for coeff in r1.coefficients)
         # After the circuit assignement, the coefficients of r1_assigned must be in [0, bound] or [p - bound, p - 1]
         assert all(coeff in range(0, int(bound) + 1) or coeff in range(p - int(bound), p) for coeff in r1_assigned.coefficients)
         # To perform a range check with a smaller lookup table, we normalize the coefficients of r1_assigned to be in [0, 2*bound]
         r1_normalized = Polynomial([(coeff + int(bound)) % p for coeff in r1_assigned.coefficients])
         assert all(coeff >= 0 and coeff <= 2*bound for coeff in r1_normalized.coefficients)
+
+        for coeff in r1.coefficients:
+            if abs(bound) - abs(coeff) < 550:
+                print("lower bound", -bound)
+                print("coeff", coeff)
+                print("upper bound", bound)
 
         '''
         CIRCUIT - END OF PHASE 1 - WITNESS COMMITMENT 
