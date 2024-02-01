@@ -11,13 +11,7 @@ def main():
     '''
     ENCRYPTION PHASE - performed outside the circuit
 
-    - `qis` are the small moduli used in the CRT basis, which product is the ciphertext modulus q
-    - `t` is the plaintext modulus
-    - `n` is the degree of the cyclotomic polynomial which is the denominator of the polynomial ring
-    - `sigma` is the standard deviation of the discrete Gaussian distribution
-    - `s` is the secret key polynomial, sampled from the ternary distribution {-1, 0, 1}
-    - `e` is the error polynomial, sampled from the discrete Gaussian distribution
-    - `m` is the message polynomial, sampled from the plaintext space
+    In this phase, we encryption operation is performed. Later, the circuit will be used to prove that the encryption is correct.
     '''
 
     qis = [
@@ -74,8 +68,6 @@ def main():
         '''
 
         ai = Polynomial([-1]) * ciphertext[1]
-        si = s
-        ei = e
         cyclo = [1] + [0] * (n - 1) + [1]
         cyclo = Polynomial(cyclo)
 
@@ -83,11 +75,11 @@ def main():
         k0i = mod_inverse(t, crt_moduli.qis[i]) * (-1)
         k0i = Polynomial([k0i])
 
-        # ai * si + ei + k0i * k1 = vi (this is ct0 before reduction in the Rqi ring)
-        vi = ai * si + ei + k0i * k1
+        # ai * s + e + k0i * k1 = vi (this is ct0 before reduction in the Rqi ring)
+        vi = ai * s + e + k0i * k1
         assert(len(vi.coefficients) - 1 == 2 * n - 2)
 
-        # ai * si + ei + k0i * k1 = ti mod Rqi = ct0
+        # ai * s + e + k0i * k1 = ti mod Rqi = ct0
         ti = ciphertext[0]
 
         # assert that vi = ti mod Rqi
@@ -141,7 +133,7 @@ def main():
         '''
         CIRCUIT - PHASE 1 - ASSIGNMENT PHASE
 
-        In this phase, the private inputs are assigned to the circuit. These are the polynomials si, ei, k1, R1, R2. 
+        In this phase, the private inputs are assigned to the circuit. These are the polynomials s, e, k1, R1, R2. 
         We also assign the public inputs qi, t, k0i and b. N is a constant of the circuit.
         '''
 
@@ -150,8 +142,8 @@ def main():
         p = 21888242871839275222246405745257275088548364400416034343698204186575808495617
 
         # Every assigned value must be an element of the field Zp. Negative values `-z` are assigned as `p - z`
-        si_assigned = assign_to_circuit(si, p)
-        ei_assigned = assign_to_circuit(ei, p)
+        s_assigned = assign_to_circuit(s, p)
+        e_assigned = assign_to_circuit(e, p)
         k1_assigned = assign_to_circuit(k1, p)
         r1_assigned = assign_to_circuit(r1, p)
         r2_assigned = assign_to_circuit(r2, p)
@@ -172,31 +164,31 @@ def main():
         bound = int((qis[i] - 1) / 2)
         assert all(coeff >= -bound and coeff <= bound for coeff in ai.coefficients)
 
-        # constraint. The coefficients of si should be in the range [-1, 0, 1]
-        assert all(coeff in [-1, 0, 1] for coeff in si.coefficients)
-        # After the circuit assignement, the coefficients of si_assigned must be in [0, 1, p - 1]
-        assert all(coeff in [0, 1, p - 1] for coeff in si_assigned.coefficients)
-        # To perform a range check with a smaller lookup table, we normalize the coefficients of si_assigned to be in [0, 1, 2] (the normalization is constrained inside the circuit)
-        si_normalized = Polynomial([(coeff + 1) % p for coeff in si_assigned.coefficients])
-        assert all(coeff in [0, 1, 2] for coeff in si_normalized.coefficients)
+        # constraint. The coefficients of s should be in the range [-1, 0, 1]
+        assert all(coeff in [-1, 0, 1] for coeff in s.coefficients)
+        # After the circuit assignement, the coefficients of s_assigned must be in [0, 1, p - 1]
+        assert all(coeff in [0, 1, p - 1] for coeff in s_assigned.coefficients)
+        # To perform a range check with a smaller lookup table, we normalize the coefficients of s_assigned to be in [0, 1, 2] (the normalization is constrained inside the circuit)
+        s_normalized = Polynomial([(coeff + 1) % p for coeff in s_assigned.coefficients])
+        assert all(coeff in [0, 1, 2] for coeff in s_normalized.coefficients)
         
-        # sanity check. The coefficients of ai * si should be in the range $[-N \cdot \frac{q_i - 1}{2}, N \cdot \frac{q_i - 1}{2}]$
+        # sanity check. The coefficients of ai * s should be in the range $[-N \cdot \frac{q_i - 1}{2}, N \cdot \frac{q_i - 1}{2}]$
         bound = int((qis[i] - 1) / 2) * n
-        res = ai * si
+        res = ai * s
         assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
 
-        # constraint. The coefficients of ei should be in the range [-B, B] where B is the upper bound of the discrete Gaussian distribution
+        # constraint. The coefficients of e should be in the range [-B, B] where B is the upper bound of the discrete Gaussian distribution
         b = int(discrete_gaussian.z_upper)
-        assert all(coeff >= -b and coeff <= b for coeff in ei.coefficients)
-        # After the circuit assignement, the coefficients of ei_assigned must be in [0, B] or [p - B, p - 1] (the normalization is constrained inside the circuit)
-        assert all(coeff in range(0, b+1) or coeff in range(p - b, p) for coeff in ei_assigned.coefficients)
-        # To perform a range check with a smaller lookup table, we normalize the coefficients of ei_assigned to be in [0, 2B]
-        ei_normalized = Polynomial([(coeff + b) % p for coeff in ei_assigned.coefficients])
-        assert all(coeff >= 0 and coeff <= 2*b for coeff in ei_normalized.coefficients)
+        assert all(coeff >= -b and coeff <= b for coeff in e.coefficients)
+        # After the circuit assignement, the coefficients of e_assigned must be in [0, B] or [p - B, p - 1] (the normalization is constrained inside the circuit)
+        assert all(coeff in range(0, b+1) or coeff in range(p - b, p) for coeff in e_assigned.coefficients)
+        # To perform a range check with a smaller lookup table, we normalize the coefficients of e_assigned to be in [0, 2B]
+        e_normalized = Polynomial([(coeff + b) % p for coeff in e_assigned.coefficients])
+        assert all(coeff >= 0 and coeff <= 2*b for coeff in e_normalized.coefficients)
 
-        # sanity check. The coefficients of ai * si + ei should be in the range $- (N \cdot \frac{q_i - 1}{2} + B), N \cdot \frac{q_i - 1}{2} + B]$
+        # sanity check. The coefficients of ai * s + e should be in the range $- (N \cdot \frac{q_i - 1}{2} + B), N \cdot \frac{q_i - 1}{2} + B]$
         bound = int((qis[i] - 1) / 2) * n + b
-        res = ai * si + ei
+        res = ai * s + e
         assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
 
         # constraint. The coefficients of R2 should be in the range [-(qi-1)/2, (qi-1)/2]
@@ -227,7 +219,7 @@ def main():
         res = k1 * k0i
         assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
 
-        # sanity check. The coefficients of vi (ai * si + ei + k1 * k0i) should be in the range $[- (N \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|), N \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|]$
+        # sanity check. The coefficients of vi (ai * s + e + k1 * k0i) should be in the range $[- (N \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|), N \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|]$
         bound = int((qis[i] - 1) / 2) * n + b + int((t - 1) / 2) * abs(k0i.coefficients[0])
         assert all(coeff >= -bound and coeff <= bound for coeff in vi.coefficients)
 
@@ -274,14 +266,14 @@ def main():
         # ... Perform assignment here and expose expose public inputs ...
 
         '''
-        CIRCUIT - PHASE 2 - CORRECT ENCRIPTION CONSTRAINT
+        CIRCUIT - PHASE 2 - CORRECT ENCRYPTION CONSTRAINT
 
         We need to prove that ti = vi + r1 * qi + r2 * cyclo mod Zp.
         We do that by proving that LHS(alpha) = RHS(alpha) for a random alpha according to Scwhartz-Zippel lemma.
         '''
 
-        s_alpha = si_assigned.evaluate(alpha)
-        e_alpha = ei_assigned.evaluate(alpha)
+        s_alpha = s_assigned.evaluate(alpha)
+        e_alpha = e_assigned.evaluate(alpha)
         k1_alpha = k1_assigned.evaluate(alpha)
         r1_alpha = r1_assigned.evaluate(alpha)
         r2_alpha = r2_assigned.evaluate(alpha)

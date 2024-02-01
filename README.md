@@ -1,9 +1,10 @@
 # proof
 
-Circuit for proving the correct encryption under BFV fully homomorphic encryption scheme. Note that this can be also generalized to any RLWE-based FHE scheme. Based on https://hackmd.io/WZBXoU7aQLaOR31L3g52Ag.
+Circuit for proving the correct encryption under BFV fully homomorphic encryption scheme. Note that this can be also generalized to any RLWE-based FHE scheme. Based on https://hackmd.io/@gaussian/HJ8DYyjPp.
 
-Currently, the repository only contains a python prototype. 
+The repository contains a python prototype for the secret key proof of encryption and for public key proof of encryption
 
 ```python
-python3 circuit.py
+python3 circuit_sk.py
+python3 circuit_pk.py
 ```
