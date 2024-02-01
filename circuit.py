@@ -1,7 +1,8 @@
-from bfv.crt import CRTModuli, CRTPolynomial
-from bfv.bfv import BFV, RLWE
+from bfv.crt import CRTModuli
+from bfv.bfv import BFVCrt
 from bfv.discrete_gauss import DiscreteGaussian
 from bfv.polynomial import Polynomial, poly_div
+from bfv.utils import mod_inverse
 from random import randint
 import copy
 
@@ -41,58 +42,30 @@ def main():
     n = 1024
     sigma = 3.2
     discrete_gaussian = DiscreteGaussian(sigma)
-    rlwe_q = RLWE(n, crt_moduli.q, t, discrete_gaussian)
-    rlwe_qis = []
-    for qi in crt_moduli.qis:
-        rlwe_qis.append(RLWE(n, qi, t, discrete_gaussian))
-
-    # Create a BFV instance for the ciphertext modulus q and a list of BFV instances for each small moduli qis
-    bfv_rq = BFV(rlwe_q)
-    bfv_rqis = [BFV(rlwe_qi) for rlwe_qi in rlwe_qis]
-
-    s = bfv_rq.rlwe.SampleFromTernaryDistribution()
-    e = bfv_rq.rlwe.SampleFromErrorDistribution()
-    m = bfv_rq.rlwe.Rt.sample_polynomial()
-
-    inputs = []
+    bfv_crt = BFVCrt(crt_moduli, n, t, discrete_gaussian)
 
     # Perform encryption of m in each CRT basis
+    s = bfv_crt.SecretKeyGen()
+    e = bfv_crt.bfv_q.rlwe.SampleFromErrorDistribution()
+    ais = []
     for i in range(len(crt_moduli.qis)):
+        ais.append(bfv_crt.bfv_qis[i].rlwe.Rq.sample_polynomial())
 
-        # a is a polynomial sampled from the uniform distribution Rqi
-        a = bfv_rqis[i].rlwe.Rq.sample_polynomial()
-        (ciphertext, k0, k1) = bfv_rqis[i].SecretKeyEncrypt(
-            s, a, m, e, crt_moduli.q
-        )
-        input = {
-            "ciphertext": ciphertext,
-            "k0": k0,
-            "k1": k1,
-        }
-        inputs.append(input)
+    m = bfv_crt.bfv_q.rlwe.Rt.sample_polynomial()
 
-    # Sanity check. Get the representation of the ciphertext in the Q basis and perform decryption and check if the decryption is equal to `m`
-    rqi_ct0_polynomials = []
-    rqi_ct1_polynomial = []
-    for input in inputs:
-        rqi_ct0_polynomials.append(input["ciphertext"][0])
-        rqi_ct1_polynomial.append(input["ciphertext"][1])
+    ciphertexts = bfv_crt.SecretKeyEncrypt(s, ais, e, m)
 
-    rq_ct0_polynomial = CRTPolynomial.from_rqi_polynomials_to_rq_polynomial(
-            rqi_ct0_polynomials, n, crt_moduli)
-    
-    rq_ct1_polynomial = CRTPolynomial.from_rqi_polynomials_to_rq_polynomial(
-            rqi_ct1_polynomial, n, crt_moduli)
-    
-    rq_ciphertext_recovered = (rq_ct0_polynomial, rq_ct1_polynomial)
-    
-    # Perform decryption on the ciphertext in the Q basis
-    dec = bfv_rq.SecretKeyDecrypt(s, rq_ciphertext_recovered, e)
+    # Sanity check for valid decryption    
+    message_prime = bfv_crt.Decrypt(s, ciphertexts)
 
-    assert dec == m
+    assert m == message_prime
+
+    # k1 = [QM]t namely the scaled message polynomial
+    k1 = Polynomial([crt_moduli.q]) * m
+    k1.reduce_coefficients_by_modulus(t)
 
     # Each round of the loop simulates a proof generation phase for a different CRT basis
-    for i, input in enumerate(inputs):
+    for i, ciphertext in enumerate(ciphertexts):
 
         '''
         SETUP PHASE - performed outside the circuit
@@ -100,20 +73,22 @@ def main():
         For each CRT basis, we need to compute the polynomials R1 and R2 (check this doc for more details: https://hackmd.io/@gaussian/HJ8DYyjPp)
         '''
 
-        ai = Polynomial([-1]) * input["ciphertext"][1]
+        ai = Polynomial([-1]) * ciphertext[1]
         si = s
         ei = e
-        k0i = Polynomial([input["k0"]])
-        k1i = input["k1"]
         cyclo = [1] + [0] * (n - 1) + [1]
         cyclo = Polynomial(cyclo)
 
-        # ai * si + ei + ki = vi (this is ct0 before reduction in the Rqi ring)
-        vi = ai * si + ei + k0i * k1i
+        # k0i = -t^{-1} namely the multiplicative inverse of t modulo qi
+        k0i = mod_inverse(t, crt_moduli.qis[i]) * (-1)
+        k0i = Polynomial([k0i])
+
+        # ai * si + ei + k0i * k1 = vi (this is ct0 before reduction in the Rqi ring)
+        vi = ai * si + ei + k0i * k1
         assert(len(vi.coefficients) - 1 == 2 * n - 2)
 
-        # ai * si + ei + ki = ti mod Rqi = ct0
-        ti = input["ciphertext"][0]
+        # ai * si + ei + k0i * k1 = ti mod Rqi = ct0
+        ti = ciphertext[0]
 
         # assert that vi = ti mod Rqi
         vi_clone = copy.deepcopy(vi)
@@ -166,7 +141,7 @@ def main():
         '''
         CIRCUIT - PHASE 1 - ASSIGNMENT PHASE
 
-        In this phase, the private inputs are assigned to the circuit. These are the polynomials si, ei, k1i, R1, R2. 
+        In this phase, the private inputs are assigned to the circuit. These are the polynomials si, ei, k1, R1, R2. 
         We also assign the public inputs qi, t, k0i and b. N is a constant of the circuit.
         '''
 
@@ -177,7 +152,7 @@ def main():
         # Every assigned value must be an element of the field Zp. Negative values `-z` are assigned as `p - z`
         si_assigned = assign_to_circuit(si, p)
         ei_assigned = assign_to_circuit(ei, p)
-        k1i_assigned = assign_to_circuit(k1i, p)
+        k1_assigned = assign_to_circuit(k1, p)
         r1_assigned = assign_to_circuit(r1, p)
         r2_assigned = assign_to_circuit(r2, p)
 
@@ -238,21 +213,21 @@ def main():
         res = r2 * cyclo
         assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
 
-        # constraint. The coefficients of k1i should be in the range [-(t-1)/2, (t-1)/2]
+        # constraint. The coefficients of k1 should be in the range [-(t-1)/2, (t-1)/2]
         bound = int((t - 1) / 2)
-        assert all(coeff >= -bound and coeff <= bound for coeff in k1i.coefficients)
-        # After the circuit assignement, the coefficients of k1i_assigned must be in [0, bound] or [p - bound, p - 1] (the normalization is constrained inside the circuit)
-        assert all(coeff in range(0, int(bound) + 1) or coeff in range(p - int(bound), p) for coeff in k1i_assigned.coefficients)
-        # To perform a range check with a smaller lookup table, we normalize the coefficients of k1i_assigned to be in [0, 2*bound]
-        k1i_normalized = Polynomial([(coeff + int(bound)) % p for coeff in k1i_assigned.coefficients])
-        assert all(coeff >= 0 and coeff <= 2*bound for coeff in k1i_normalized.coefficients)
+        assert all(coeff >= -bound and coeff <= bound for coeff in k1.coefficients)
+        # After the circuit assignement, the coefficients of k1_assigned must be in [0, bound] or [p - bound, p - 1] (the normalization is constrained inside the circuit)
+        assert all(coeff in range(0, int(bound) + 1) or coeff in range(p - int(bound), p) for coeff in k1_assigned.coefficients)
+        # To perform a range check with a smaller lookup table, we normalize the coefficients of k1_assigned to be in [0, 2*bound]
+        k1_normalized = Polynomial([(coeff + int(bound)) % p for coeff in k1_assigned.coefficients])
+        assert all(coeff >= 0 and coeff <= 2*bound for coeff in k1_normalized.coefficients)
 
-        # sanity check. The coefficients of k1i * k0i should be in the range $[-\frac{t - 1}{2} \cdot |K_i^{0}|, \frac{t - 1}{2} \cdot |K_i^{0}|]$
+        # sanity check. The coefficients of k1 * k0i should be in the range $[-\frac{t - 1}{2} \cdot |K_i^{0}|, \frac{t - 1}{2} \cdot |K_i^{0}|]$
         bound = int((t - 1) / 2) * abs(k0i.coefficients[0])
-        res = k1i * k0i
+        res = k1 * k0i
         assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
 
-        # sanity check. The coefficients of vi (ai * si + ei + k1i * k0i) should be in the range $[- (N \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|), N \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|]$
+        # sanity check. The coefficients of vi (ai * si + ei + k1 * k0i) should be in the range $[- (N \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|), N \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|]$
         bound = int((qis[i] - 1) / 2) * n + b + int((t - 1) / 2) * abs(k0i.coefficients[0])
         assert all(coeff >= -bound and coeff <= bound for coeff in vi.coefficients)
 
@@ -276,12 +251,6 @@ def main():
         # To perform a range check with a smaller lookup table, we normalize the coefficients of r1_assigned to be in [0, 2*bound]
         r1_normalized = Polynomial([(coeff + int(bound)) % p for coeff in r1_assigned.coefficients])
         assert all(coeff >= 0 and coeff <= 2*bound for coeff in r1_normalized.coefficients)
-
-        for coeff in r1.coefficients:
-            if abs(bound) - abs(coeff) < 550:
-                print("lower bound", -bound)
-                print("coeff", coeff)
-                print("upper bound", bound)
 
         '''
         CIRCUIT - END OF PHASE 1 - WITNESS COMMITMENT 
@@ -313,12 +282,12 @@ def main():
 
         s_alpha = si_assigned.evaluate(alpha)
         e_alpha = ei_assigned.evaluate(alpha)
-        k1i_alpha = k1i_assigned.evaluate(alpha)
+        k1_alpha = k1_assigned.evaluate(alpha)
         r1_alpha = r1_assigned.evaluate(alpha)
         r2_alpha = r2_assigned.evaluate(alpha)
 
         lhs = ti_alpha 
-        rhs = (ai_alpha * s_alpha + e_alpha + (k1i_alpha * k0i.coefficients[0]) + (r1_alpha * qis[i]) + (r2_alpha * cyclo_alpha))
+        rhs = (ai_alpha * s_alpha + e_alpha + (k1_alpha * k0i.coefficients[0]) + (r1_alpha * qis[i]) + (r2_alpha * cyclo_alpha))
 
         assert lhs % p == rhs % p
 
