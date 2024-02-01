@@ -181,12 +181,10 @@ def main():
         lhs = ji
         rhs = yi + (p1 * Polynomial([qis[i]])) + (p2 * cyclo)
 
-        # remove the leading zeroes from the rhs 
-        for j in range(len(rhs.coefficients)):
-            if rhs.coefficients[j] != 0:
-                rhs.coefficients = rhs.coefficients[j:]
-                break
-
+        # remove the leading zeroes from rhs until the length of rhs.coefficients is equal to n
+        while len(rhs.coefficients) > n and rhs.coefficients[0] == 0:
+            rhs.coefficients.pop(0)
+        
         assert lhs == rhs
 
         '''
