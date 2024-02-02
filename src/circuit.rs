@@ -186,11 +186,11 @@ mod test {
 
         // 2. Build the circuit for MockProver
         let params = test_params();
-        let mut builder =
+        let mut mock_builder =
             RlcCircuitBuilder::from_stage(CircuitBuilderStage::Mock, 0).use_params(params);
-        builder.base.set_lookup_bits(8); // Set the lookup bits to 8
+        mock_builder.base.set_lookup_bits(8); // Set the lookup bits to 8
 
-        let circuit = RlcExecutor::new(builder, DummyCircuit { a, b, c });
+        let circuit = RlcExecutor::new(mock_builder, DummyCircuit { a, b, c });
 
         // 3. Run the mock prover. The circuit should be satisfied
         MockProver::run(K as u32, &circuit, vec![])
@@ -225,9 +225,9 @@ mod test {
 
         // 3. Build the circuit for key generation, here we can pad the inputs with zeros
         let circuit_params = test_params();
-        let mut builder = RlcCircuitBuilder::from_stage(CircuitBuilderStage::Keygen, 0)
+        let mut key_gen_builder = RlcCircuitBuilder::from_stage(CircuitBuilderStage::Keygen, 0)
             .use_params(circuit_params);
-        builder.base.set_lookup_bits(8); // Set the lookup bits to 8
+        key_gen_builder.base.set_lookup_bits(8); // Set the lookup bits to 8
 
         let empty_inputs = DummyCircuit {
             a: vec![Fr::ZERO; a.len()],
@@ -235,7 +235,7 @@ mod test {
             c: vec![Fr::ZERO; c.len()],
         };
 
-        let circuit = RlcExecutor::new(builder, empty_inputs);
+        let circuit = RlcExecutor::new(key_gen_builder, empty_inputs);
 
         // 4. Generate the verification key and the proving key
         println!("vk gen started");
@@ -251,11 +251,11 @@ mod test {
 
         // 5. Generate the proof, here we pass the actual inputs
         let circuit_params = test_params();
-        let mut builder = RlcCircuitBuilder::from_stage(CircuitBuilderStage::Prover, 0)
+        let mut prover_builder = RlcCircuitBuilder::from_stage(CircuitBuilderStage::Prover, 0)
             .use_params(circuit_params);
-        builder.base.set_lookup_bits(8); // Set the lookup bits to 8
+        prover_builder.base.set_lookup_bits(8); // Set the lookup bits to 8
 
-        let circuit = RlcExecutor::new(builder, DummyCircuit { a, b, c });
+        let circuit = RlcExecutor::new(prover_builder, DummyCircuit { a, b, c });
 
         circuit
             .0
@@ -296,12 +296,12 @@ mod test {
 
         // 2. Build the circuit
         let params = test_params();
-        let mut builder =
+        let mut mock_builder =
             RlcCircuitBuilder::from_stage(CircuitBuilderStage::Mock, 0).use_params(params);
-        builder.base.set_lookup_bits(8); // Set the lookup bits to 8
+        mock_builder.base.set_lookup_bits(8); // Set the lookup bits to 8
 
         let circuit = RlcExecutor::new(
-            builder,
+            mock_builder,
             DummyCircuit {
                 a,
                 b: out_of_range_b,
@@ -346,11 +346,11 @@ mod test {
 
         // 2. Build the circuit
         let params = test_params();
-        let mut builder =
+        let mut mock_builder =
             RlcCircuitBuilder::from_stage(CircuitBuilderStage::Mock, 0).use_params(params);
-        builder.base.set_lookup_bits(8); // Set the lookup bits to 8
+        mock_builder.base.set_lookup_bits(8); // Set the lookup bits to 8
 
-        let circuit = RlcExecutor::new(builder, DummyCircuit { a, b, c: invalid_c });
+        let circuit = RlcExecutor::new(mock_builder, DummyCircuit { a, b, c: invalid_c });
 
         // 3. Run the mock prover
         let invalid_prover = MockProver::run(K as u32, &circuit, vec![]).unwrap();
