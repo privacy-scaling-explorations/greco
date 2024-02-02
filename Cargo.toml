@@ -1,8 +1,13 @@
 [package]
-name = "proof"
+name = "halo2-fhe"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", tag = "v0.4.1-git", default-features = false, features = ["test-utils", "halo2-axiom"] }
+rand = "0.8"
+axiom-eth = { git = "https://github.com/enricobottazzi/axiom-eth", default-features = false, features = ["halo2-axiom"] }
+serde_json = { version = "1.0", default-features = false }
+itertools = "0.11"
