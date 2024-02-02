@@ -10,7 +10,7 @@ use halo2_base::{
     QuantumCell::{Constant, Existing},
 };
 
-const K: usize = 16;
+const K: usize = 9;
 
 /// Helper function to define the parameters of the RlcCircuit
 pub fn test_params() -> RlcCircuitParams {
@@ -120,6 +120,7 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for DummyCircuit<F> {
         let rlc_trace_c = rlc.compute_rlc_fixed_len(ctx_rlc, c_assigned);
 
         // enforce gate a(gamma) * b(gamma) - c(gamma) = 0
+        // this is equal to check that a * b = c according to Scwartz-Zippel lemma
         ctx_gate.assign_region(
             [
                 Constant(F::from(0)),
@@ -130,7 +131,7 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for DummyCircuit<F> {
             [0],
         );
 
-        // Assert the correctness of the RLC
+        // assert the correctness of the RLC
         let expected_poly_a_eval_at_gamma = evaluate_poly(&a, gamma);
         let expected_poly_b_eval_at_gamma = evaluate_poly(&b, gamma);
         let expected_poly_c_eval_at_gamma = evaluate_poly(&c, gamma);
@@ -147,15 +148,21 @@ mod test {
     use super::{test_params, K};
     use crate::circuit::DummyCircuit;
     use crate::utils::mul;
-    use axiom_eth::rlc::{circuit::builder::RlcCircuitBuilder, utils::executor::RlcExecutor};
+    use axiom_eth::{
+        halo2curves::{bn256::Bn256, ff::Field},
+        rlc::{circuit::builder::RlcCircuitBuilder, utils::executor::RlcExecutor},
+    };
     use halo2_base::{
         gates::circuit::CircuitBuilderStage,
         halo2_proofs::{
             dev::{FailureLocation, MockProver, VerifyFailure},
             halo2curves::bn256::Fr,
+            plonk::{keygen_pk, keygen_vk, Error},
+            poly::kzg::commitment::ParamsKZG,
         },
+        utils::testing::{check_proof, gen_proof},
     };
-    use rand::Rng;
+    use rand::{rngs::StdRng, Rng, SeedableRng};
 
     #[test]
     pub fn test_dummy_circuit_valid() {
@@ -177,7 +184,7 @@ mod test {
         ];
         let c = mul(a.clone(), b.clone());
 
-        // 2. Build the circuit
+        // 2. Build the circuit for MockProver
         let params = test_params();
         let mut builder =
             RlcCircuitBuilder::from_stage(CircuitBuilderStage::Mock, 0).use_params(params);
@@ -185,10 +192,85 @@ mod test {
 
         let circuit = RlcExecutor::new(builder, DummyCircuit { a, b, c });
 
-        // 3. Run the mock prover
+        // 3. Run the mock prover. The circuit should be satisfied
         MockProver::run(K as u32, &circuit, vec![])
             .unwrap()
             .assert_satisfied();
+    }
+
+    #[test]
+    pub fn test_dummy_circuit_full_prover() -> Result<(), Error> {
+        let mut rng = rand::thread_rng();
+
+        // 1. Define the input polynomials
+        // The polynomials are defined in coefficients form starting from the highest degree term.
+        let a = vec![
+            Fr::from(rng.gen_range(0..16) as u64),
+            Fr::from(rng.gen_range(0..16) as u64),
+            Fr::from(rng.gen_range(0..16) as u64),
+            Fr::from(rng.gen_range(0..16) as u64),
+        ];
+        let b = vec![
+            Fr::from(rng.gen_range(0..16) as u64),
+            Fr::from(rng.gen_range(0..16) as u64),
+            Fr::from(rng.gen_range(0..16) as u64),
+            Fr::from(rng.gen_range(0..16) as u64),
+        ];
+        let c = mul(a.clone(), b.clone());
+
+        // 2. Generate (unsafe) trusted setup parameters
+        let mut rng = StdRng::from_seed([0u8; 32]);
+        let k = K as u32;
+        let kzg_params = ParamsKZG::<Bn256>::setup(k, &mut rng);
+
+        // 3. Build the circuit for key generation, here we can pad the inputs with zeros
+        let circuit_params = test_params();
+        let mut builder = RlcCircuitBuilder::from_stage(CircuitBuilderStage::Keygen, 0)
+            .use_params(circuit_params);
+        builder.base.set_lookup_bits(8); // Set the lookup bits to 8
+
+        let empty_inputs = DummyCircuit {
+            a: vec![Fr::ZERO; a.len()],
+            b: vec![Fr::ZERO; b.len()],
+            c: vec![Fr::ZERO; c.len()],
+        };
+
+        let circuit = RlcExecutor::new(builder, empty_inputs);
+
+        // 4. Generate the verification key and the proving key
+        println!("vk gen started");
+        let vk = keygen_vk(&kzg_params, &circuit).unwrap();
+        println!("vk gen done");
+        let pk = keygen_pk(&kzg_params, vk, &circuit).unwrap();
+        println!("pk gen done");
+        let break_points = circuit.0.builder.borrow().break_points();
+        drop(circuit);
+
+        println!();
+        println!("==============STARTING PROOF GEN===================");
+
+        // 5. Generate the proof, here we pass the actual inputs
+        let circuit_params = test_params();
+        let mut builder = RlcCircuitBuilder::from_stage(CircuitBuilderStage::Prover, 0)
+            .use_params(circuit_params);
+        builder.base.set_lookup_bits(8); // Set the lookup bits to 8
+
+        let circuit = RlcExecutor::new(builder, DummyCircuit { a, b, c });
+
+        circuit
+            .0
+            .builder
+            .borrow_mut()
+            .set_break_points(break_points);
+        let timer = std::time::Instant::now();
+        let proof = gen_proof(&kzg_params, &pk, circuit);
+        println!("proof gen done");
+        println!("Proof generation time: {:?}", timer.elapsed());
+
+        // 6. Verify the proof
+        check_proof(&kzg_params, pk.get_vk(), &proof, true);
+        println!("verify done");
+        Ok(())
     }
 
     #[test]
