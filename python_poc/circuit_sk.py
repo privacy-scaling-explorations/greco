@@ -5,13 +5,14 @@ from bfv.polynomial import Polynomial, poly_div
 from bfv.utils import mod_inverse
 from random import randint
 import copy
+from utils import assign_to_circuit
 
 def main(): 
     
     '''
     ENCRYPTION PHASE - performed outside the circuit
 
-    In this phase, we encryption operation is performed. Later, the circuit will be used to prove that the encryption is correct.
+    In this phase, the encryption operation is performed. Later, the circuit will be used to prove that the encryption was performed correctly.
     '''
 
     qis = [
@@ -67,6 +68,8 @@ def main():
         For each CRT basis, we need to compute the polynomials R1 and R2 (check this doc for more details: https://hackmd.io/@gaussian/HJ8DYyjPp)
         '''
 
+        ct0i = ciphertext[0]
+        ct1i = ciphertext[1]
         ai = Polynomial([-1]) * ciphertext[1]
         cyclo = [1] + [0] * (n - 1) + [1]
         cyclo = Polynomial(cyclo)
@@ -75,25 +78,23 @@ def main():
         k0i = mod_inverse(t, crt_moduli.qis[i]) * (-1)
         k0i = Polynomial([k0i])
 
-        # ai * s + e + k0i * k1 = vi (this is ct0 before reduction in the Rqi ring)
-        vi = ai * s + e + k0i * k1
-        assert(len(vi.coefficients) - 1 == 2 * n - 2)
+        # ai * s + e + k0i * k1 = hat(ct0i) (this is ct0i before reduction in the Rqi ring)
+        ct0i_hat = ai * s + e + k0i * k1
+        assert(len(ct0i_hat.coefficients) - 1 == 2 * n - 2)
 
-        # ai * s + e + k0i * k1 = ti mod Rqi = ct0
-        ti = ciphertext[0]
-
-        # assert that vi = ti mod Rqi
-        vi_clone = copy.deepcopy(vi)
+        # ai * s + e + k0i * k1 = ct0i mod Rqi
+        # assert that ct0i_hat = ct0i mod Rqi
+        ct0i_hat_clone = copy.deepcopy(ct0i_hat)
         # mod Rqi means that we need to:
-        # - reduce the coefficients of vi_clone by the cyclotomic polynomial
-        # - reduce the coefficients of vi_clone by the modulus
-        vi_clone.reduce_coefficients_by_cyclo(cyclo.coefficients)
-        vi_clone.reduce_coefficients_by_modulus(qis[i])
-        assert vi_clone == ti
+        # - reduce the coefficients of ct0i_hat_clone by the cyclotomic polynomial
+        # - reduce the coefficients of ct0i_hat_clone by the modulus
+        ct0i_hat_clone.reduce_coefficients_by_cyclo(cyclo.coefficients)
+        ct0i_hat_clone.reduce_coefficients_by_modulus(qis[i])
+        assert ct0i_hat_clone == ct0i
 
         # Calculate R2
-        # divide ti - vi by the cyclotomic polynomial over Zqi to get R2
-        num = ti + (Polynomial([-1]) * vi)
+        # divide ct0i - ct0i_hat by the cyclotomic polynomial over Zqi to get R2
+        num = ct0i + (Polynomial([-1]) * ct0i_hat)
         # reduce the coefficients of num by the modulus qi 
         num.reduce_coefficients_by_modulus(qis[i])
         (quotient, rem) = poly_div(num.coefficients, cyclo.coefficients)
@@ -103,24 +104,24 @@ def main():
         # assert that the degree of R2 is equal to n - 2
         assert len(r2.coefficients) - 1 == n - 2
 
-        # Assert that ti - vi = R2 * cyclo mod Zqi
-        lhs = ti + (Polynomial([-1]) * vi)
+        # Assert that ct0i - ct0i_hat = R2 * cyclo mod Zqi
+        lhs = ct0i + (Polynomial([-1]) * ct0i_hat)
         rhs = r2 * cyclo
         # reduce the coefficients of lhs by the modulus qi
         lhs.reduce_coefficients_by_modulus(qis[i])
         assert lhs == rhs 
         
         # Calculate R1
-        # divide ti - vi - R2 * cyclo by the modulus qi to get R1
-        num = ti + (Polynomial([-1]) * vi) + Polynomial([-1]) * (r2 * cyclo)
+        # divide ct0i - ct0i_hat - R2 * cyclo by the modulus qi to get R1
+        num = ct0i + (Polynomial([-1]) * ct0i_hat) + Polynomial([-1]) * (r2 * cyclo)
         (quotient, rem) = poly_div(num.coefficients, [qis[i]])
         # assert that the remainder is zero
         assert rem == []
         r1 = Polynomial(quotient)
 
-        # Assert that ti = vi + r1 * qi + r2 * cyclo mod Zp
-        lhs = ti
-        rhs = vi + (r1 * Polynomial([qis[i]])) + (r2 * cyclo)
+        # Assert that ct0i = ct0i_hat + r1 * qi + r2 * cyclo mod Zp
+        lhs = ct0i
+        rhs = ct0i_hat + (r1 * Polynomial([qis[i]])) + (r2 * cyclo)
 
         # remove the leading zeroes from rhs until the length of rhs.coefficients is equal to n
         while len(rhs.coefficients) > n and rhs.coefficients[0] == 0:
@@ -132,8 +133,8 @@ def main():
         '''
         CIRCUIT - PHASE 1 - ASSIGNMENT PHASE
 
-        In this phase, the private inputs are assigned to the circuit. These are the polynomials s, e, k1, R1, R2. 
-        We also assign the public inputs qi, t, k0i and b. N is a constant of the circuit.
+        In this phase, the polynomials belonging to the matrix S are assigned to the circuit.
+        We also assign the public inputs qi, t, k0i and b, while N is a constant of the circuit.
         '''
 
         # ... Perform assignment here and expose public inputs...
@@ -155,9 +156,9 @@ def main():
 
         # ... Perform range check here ...
 
-        # sanity check. The coefficients of ti should be in the range [-(qi-1)/2, (qi-1)/2]
+        # sanity check. The coefficients of ct0i should be in the range [-(qi-1)/2, (qi-1)/2]
         bound = int((qis[i] - 1) / 2)
-        assert all(coeff >= -bound and coeff <= bound for coeff in ti.coefficients)
+        assert all(coeff >= -bound and coeff <= bound for coeff in ct0i.coefficients)
 
         # sanity check. The coefficients of ai should be in the range [-(qi-1)/2, (qi-1)/2]
         bound = int((qis[i] - 1) / 2)
@@ -218,21 +219,21 @@ def main():
         res = k1 * k0i
         assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
 
-        # sanity check. The coefficients of vi (ai * s + e + k1 * k0i) should be in the range $[- (N \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|), N \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|]$
+        # sanity check. The coefficients of ct0i_hat (ai * s + e + k1 * k0i) should be in the range $[- (N \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|), N \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|]$
         bound = int((qis[i] - 1) / 2) * n + b + int((t - 1) / 2) * abs(k0i.coefficients[0])
-        assert all(coeff >= -bound and coeff <= bound for coeff in vi.coefficients)
+        assert all(coeff >= -bound and coeff <= bound for coeff in ct0i_hat.coefficients)
 
-        # sanity check. The coefficients of ti - vi should be in the range $ [- ((N+1) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|), (N+1) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|]$
+        # sanity check. The coefficients of ct0i - ct0i_hat should be in the range $ [- ((N+1) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|), (N+1) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|]$
         bound = int((qis[i] - 1) / 2) * (n + 1) + b + int((t - 1) / 2) * abs(k0i.coefficients[0])
-        sub = ti + (Polynomial([-1]) * vi)
+        sub = ct0i + (Polynomial([-1]) * ct0i_hat)
         assert all(coeff >= -bound and coeff <= bound for coeff in sub.coefficients)
 
-        # sanity check. The coefficients of ti - vi - R2 * cyclo should be in the range $[- ((N+2) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|), (N+2) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|]$
+        # sanity check. The coefficients of ct0i - ct0i_hat - R2 * cyclo should be in the range $[- ((N+2) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|), (N+2) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|]$
         bound = ((qis[i] - 1) / 2) * (n + 2) + b + ((t - 1) / 2) * abs(k0i.coefficients[0])
-        sub = ti + (Polynomial([-1]) * vi) + Polynomial([-1]) * (r2 * cyclo)
+        sub = ct0i + (Polynomial([-1]) * ct0i_hat) + Polynomial([-1]) * (r2 * cyclo)
         assert all(coeff >= -bound and coeff <= bound for coeff in sub.coefficients)
 
-        # constraint. The coefficients of (ti - vi - R2 * cyclo) / qi = R1 should be in the range $[\frac{- ((N+2) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|)}{q_i}, \frac{(N+2) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|}{q_i}]$
+        # constraint. The coefficients of (ct0i - ct0i_hat - R2 * cyclo) / qi = R1 should be in the range $[\frac{- ((N+2) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|)}{q_i}, \frac{(N+2) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|}{q_i}]$
         bound = (int((qis[i] - 1) / 2) * (n + 2) + b + int((t - 1) / 2) * abs(k0i.coefficients[0])) / qis[i]
         # round bound to the nearest integer
         bound = int(bound)
@@ -254,20 +255,20 @@ def main():
 
         '''
         CIRCUIT - PHASE 2 - ASSIGNMENT PHASE
-        The public inputs are assigned to the circuit. These are the polynomials ai, cyclo, ti evaluated at alpha.
+        The public inputs are assigned to the circuit. These are the polynomials ai, cyclo, ct0i evaluated at alpha.
         '''
 
-        # The evaluation of ai_alpha, cyclo_alpha, ti_alpha is performed outside the circuit
+        # The evaluation of ai_alpha, cyclo_alpha, ct0i_alpha is performed outside the circuit
         ai_alpha = ai.evaluate(alpha) 
         cyclo_alpha = cyclo.evaluate(alpha)
-        ti_alpha = ti.evaluate(alpha)
+        ct0i_alpha = ct0i.evaluate(alpha)
 
         # ... Perform assignment here and expose expose public inputs ...
 
         '''
         CIRCUIT - PHASE 2 - CORRECT ENCRYPTION CONSTRAINT
 
-        We need to prove that ti = vi + r1 * qi + r2 * cyclo mod Zp.
+        We need to prove that ct0i = ct0i_hat + r1 * qi + r2 * cyclo mod Zp.
         We do that by proving that LHS(alpha) = RHS(alpha) for a random alpha according to Scwhartz-Zippel lemma.
         '''
 
@@ -277,25 +278,9 @@ def main():
         r1_alpha = r1_assigned.evaluate(alpha)
         r2_alpha = r2_assigned.evaluate(alpha)
 
-        lhs = ti_alpha 
+        lhs = ct0i_alpha 
         rhs = (ai_alpha * s_alpha + e_alpha + (k1_alpha * k0i.coefficients[0]) + (r1_alpha * qis[i]) + (r2_alpha * cyclo_alpha))
 
         assert lhs % p == rhs % p
-
-def assign_to_circuit(poly: Polynomial, p: int) -> Polynomial:
-    '''
-    This function takes a polynomial and returns its coefficients in the field Zp
-    `poly` is the polynomial to be assigned to the circuit
-    `p` is the field modulus
-    '''
-    assigned_coefficients = []
-    for coeff in poly.coefficients:
-        if coeff < 0:
-            coeff = coeff % p
-        if coeff > p:
-            coeff = coeff % p
-        assigned_coefficients.append(coeff)
-
-    return Polynomial(assigned_coefficients)
 
 main()
