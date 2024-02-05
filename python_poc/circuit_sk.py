@@ -51,6 +51,9 @@ def main(args):
     r1s = []
     r1_bounds = []
     r2_bounds = []
+    ais_normalized = []
+    ct0is_normalized = []
+    k0is = []
 
     # Each round of the loop simulates a proof generation phase for a different CRT basis
     for i, ciphertext in enumerate(ciphertexts):
@@ -254,9 +257,12 @@ def main(args):
         '''
 
         # The evaluation of ai_alpha, cyclo_alpha, ct0i_alpha is performed outside the circuit
-        ai_alpha = ai.evaluate(alpha) 
+        ai_normalized = Polynomial([coeff % p for coeff in ais[i].coefficients])
+        ct0i_normalized = Polynomial([coeff % p for coeff in ciphertext[0].coefficients])
+
+        ai_alpha = ai_normalized.evaluate(alpha) 
         cyclo_alpha = cyclo.evaluate(alpha)
-        ct0i_alpha = ct0i.evaluate(alpha)
+        ct0i_alpha = ct0i_normalized.evaluate(alpha)
 
         # ... Perform assignment here and expose expose public inputs ...
 
@@ -272,33 +278,41 @@ def main(args):
         k1_alpha = k1_assigned.evaluate(alpha)
         r1_alpha = r1_assigned.evaluate(alpha)
         r2_alpha = r2_assigned.evaluate(alpha)
+        k0i_normalized = k0i.coefficients[0] % p
 
         lhs = ct0i_alpha 
-        rhs = (ai_alpha * s_alpha + e_alpha + (k1_alpha * k0i.coefficients[0]) + (r1_alpha * qis[i]) + (r2_alpha * cyclo_alpha))
+        rhs = (ai_alpha * s_alpha + e_alpha + (k1_alpha * k0i_normalized) + (r1_alpha * qis[i]) + (r2_alpha * cyclo_alpha))
 
         assert lhs % p == rhs % p
 
         r1s.append(r1_assigned)
         r2s.append(r2_assigned)
+        ais_normalized.append(ai_normalized)
+        ct0is_normalized.append(ct0i_normalized)
+        k0is.append(k0i_normalized)
 
     # Parse the inputs into a JSON format such this can be used as input for the (real) circuit
     json_input = {
         "s": [str(coef) for coef in s_assigned.coefficients],
         "e": [str(coef) for coef in e_assigned.coefficients],
         "k1": [str(coef) for coef in k1_assigned.coefficients],
+        "k0is": [str(k0i) for k0i in k0is],
+        "qis": [str(qi) for qi in qis],
         "r2s": [[str(coef) for coef in r2.coefficients] for r2 in r2s],
         "r1s": [[str(coef) for coef in r1.coefficients] for r1 in r1s],
+        "ais": [[str(coef) for coef in ai.coefficients] for ai in ais_normalized],
+        "ct0is": [[str(coef) for coef in ct0i.coefficients] for ct0i in ct0is_normalized],
     }
 
     # write the inputs to a json file
     with open(args.output, 'w') as f:
         json.dump(json_input, f)
 
-    print(f"const N: usize = {n};")
-    print(f"const E_BOUND: u64 = {b};")
-    print(f"const R1_BOUNDS: [u64; {len(r1_bounds)}] = [{', '.join(map(str, r1_bounds))}];")
-    print(f"const R2_BOUNDS: [u64; {len(r2_bounds)}] = [{', '.join(map(str, r2_bounds))}];")
-    print(f"const K1_BOUND: u64 = {k1_bound};")
+    print(f"pub const N: usize = {n};")
+    print(f"pub const E_BOUND: u64 = {b};")
+    print(f"pub const R1_BOUNDS: [u64; {len(r1_bounds)}] = [{', '.join(map(str, r1_bounds))}];")
+    print(f"pub const R2_BOUNDS: [u64; {len(r2_bounds)}] = [{', '.join(map(str, r2_bounds))}];")
+    print(f"pub const K1_BOUND: u64 = {k1_bound};")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

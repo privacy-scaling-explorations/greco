@@ -37,8 +37,12 @@ pub struct BfvSkEncryptionCircuit {
     s: Vec<String>,
     e: Vec<String>,
     k1: Vec<String>,
+    k0is: Vec<String>,
+    qis: Vec<String>,
     r2s: Vec<Vec<String>>,
     r1s: Vec<Vec<String>>,
+    ais: Vec<Vec<String>>,
+    ct0is: Vec<Vec<String>>,
 }
 
 /// Payload returned by the first phase of the circuit to be reused in the second phase
@@ -46,8 +50,12 @@ pub struct Payload<F: ScalarField> {
     s: Vec<String>,
     e: Vec<String>,
     k1: Vec<String>,
+    k0_0: String,
+    q0: String,
     r2_0: Vec<String>,
     r1_0: Vec<String>,
+    ai_0: Vec<String>,
+    ct0_0: Vec<String>,
     s_assigned: Vec<AssignedValue<F>>,
     e_assigned: Vec<AssignedValue<F>>,
     k1_assigned: Vec<AssignedValue<F>>,
@@ -62,6 +70,7 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
     // * Assign the secret polynomials from the matrix S to the circuit
     // * Assign the public inputs to the circuit
     // * Perform range checks on the coefficients of the secret polynomials
+    // TODO: explain
     fn virtual_assign_phase0(
         &self,
         builder: &mut RlcCircuitBuilder<F>,
@@ -143,7 +152,7 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
             range.check_less_than_safe(ctx, normalized_coeff, 2 * K1_BOUND);
         }
 
-        // perform range check on the coefficients of `r2[0]`. Note that the degree of R2 is N - 2
+        // perform range check on the coefficients of `r2_0`. Note that the degree of r2 is N - 2
 
         let r2_0_bound_constant = Constant(F::from(R2_BOUNDS[0]));
 
@@ -152,7 +161,7 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
             range.check_less_than_safe(ctx, normalized_coeff, 2 * R2_BOUNDS[0]);
         }
 
-        // perform range check on the coefficients of `r1[0]`. Note that the degree of R1 is 2N - 2
+        // perform range check on the coefficients of `r1_0`. Note that the degree of r1 is 2N - 2
 
         let r1_0_bound_constant = Constant(F::from(R1_BOUNDS[0]));
 
@@ -165,8 +174,12 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
             s: self.s.clone(),
             e: self.e.clone(),
             k1: self.k1.clone(),
+            k0_0: self.k0is[0].clone(),
+            q0: self.qis[0].clone(),
             r2_0: self.r2s[0].clone(),
             r1_0: self.r1s[0].clone(),
+            ai_0: self.ais[0].clone(),
+            ct0_0: self.ct0is[0].clone(),
             s_assigned,
             e_assigned,
             k1_assigned,
@@ -176,11 +189,10 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
     }
 
     // Phase 1
-    // * Evaluate polynomials of matrix S at the point `gamma`
-    // * Assert that `a(gamma) * b(gamma) = c(gamma)`
+    // TODO: explain
     fn virtual_assign_phase1(
         builder: &mut RlcCircuitBuilder<F>,
-        _: &RangeChip<F>,
+        range: &RangeChip<F>,
         rlc: &RlcChip<F>,
         payload: Self::FirstPhasePayload,
     ) {
@@ -188,8 +200,12 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
             s,
             e,
             k1,
+            k0_0,
+            q0,
             r2_0,
             r1_0,
+            ai_0,
+            ct0_0,
             s_assigned,
             e_assigned,
             k1_assigned,
@@ -260,6 +276,76 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
             rlc_trace_r1_0.rlc_val.value(),
             &expected_poly_r1_0_eval_at_gamma
         );
+
+        let ai_0_poly = ai_0
+            .iter()
+            .map(|ai_0| F::from_str_vartime(ai_0).unwrap())
+            .collect::<Vec<_>>();
+
+        // Assign ai_0(gamma) to the circuit
+        let ai_0_eval_at_gamma = evaluate_poly(&ai_0_poly, gamma);
+        let assigned_poly_ai_0_eval_at_gamma = ctx_gate.load_witness(ai_0_eval_at_gamma);
+
+        // cyclo poly is equal to x^N + 1
+        let mut cyclo_poly = vec![F::from(0); N + 1];
+        cyclo_poly[0] = F::from(1);
+        cyclo_poly[N] = F::from(1);
+
+        // Assign cyclo(gamma) to the circuit
+        let cyclo_eval_at_gamma = evaluate_poly(&cyclo_poly, gamma);
+        let assigned_poly_cyclo_eval_at_gamma = ctx_gate.load_witness(cyclo_eval_at_gamma);
+
+        let ct0_0_poly = ct0_0
+            .iter()
+            .map(|ct0_0| F::from_str_vartime(ct0_0).unwrap())
+            .collect::<Vec<_>>();
+
+        // Assign ct0_0(gamma) to the circuit
+        let ct0_0_eval_at_gamma = evaluate_poly(&ct0_0_poly, gamma);
+        let assigned_poly_ct0_0_eval_at_gamma = ctx_gate.load_witness(ct0_0_eval_at_gamma);
+
+        // Prove that LHS(gamma) = RHS(gamma)
+        // LHS = ct0_0(gamma)
+        // RHS = ai_0(gamma) * s(gamma) + e(gamma) + k1(gamma) * k0i_0 + r1_0(gamma) * qis_0 + r2_0(gamma) * cyclo(gamma)
+
+        let gate = range.gate();
+
+        // rhs_0 = ai_0(gamma) * s(gamma)
+        let rhs_0 = gate.mul(
+            ctx_gate,
+            assigned_poly_ai_0_eval_at_gamma,
+            rlc_trace_s.rlc_val,
+        );
+
+        // rhs_1 = e(gamma)
+        let rhs_1 = rlc_trace_e.rlc_val;
+
+        let k0_0_assigned = ctx_gate.load_witness(F::from_str_vartime(&k0_0).unwrap());
+
+        // rhs_2 = k1(gamma) * k0i_0
+        let rhs_2 = gate.mul(ctx_gate, rlc_trace_k1.rlc_val, k0_0_assigned);
+
+        let q0_assigned = ctx_gate.load_witness(F::from_str_vartime(&q0).unwrap());
+
+        // rhs_3 = r1_0(gamma) * qis_0
+        let rhs_3 = gate.mul(ctx_gate, rlc_trace_r1_0.rlc_val, q0_assigned);
+
+        // rhs_4 = r2_0(gamma) * cyclo(gamma)
+        let rhs_4 = gate.mul(
+            ctx_gate,
+            rlc_trace_r2_0.rlc_val,
+            assigned_poly_cyclo_eval_at_gamma,
+        );
+
+        let rhs_01 = gate.add(ctx_gate, rhs_0, rhs_1);
+        let rhs_23 = gate.add(ctx_gate, rhs_2, rhs_3);
+        let rhs_0123 = gate.add(ctx_gate, rhs_01, rhs_23);
+        let rhs = gate.add(ctx_gate, rhs_0123, rhs_4);
+        let lhs = assigned_poly_ct0_0_eval_at_gamma;
+
+        let res = gate.sub(ctx_gate, lhs, rhs);
+        println!("res: {:?}", res.value());
+        gate.assert_is_const(ctx_gate, &res, &F::from(0));
     }
 }
 
