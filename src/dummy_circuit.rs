@@ -146,7 +146,7 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for DummyCircuit<F> {
 mod test {
 
     use super::{test_params, K};
-    use crate::circuit::DummyCircuit;
+    use crate::dummy_circuit::DummyCircuit;
     use crate::utils::mul;
     use axiom_eth::{
         halo2curves::{bn256::Bn256, ff::Field},
@@ -239,9 +239,9 @@ mod test {
 
         // 4. Generate the verification key and the proving key
         println!("vk gen started");
-        let vk = keygen_vk(&kzg_params, &circuit).unwrap();
+        let vk = keygen_vk(&kzg_params, &circuit)?;
         println!("vk gen done");
-        let pk = keygen_pk(&kzg_params, vk, &circuit).unwrap();
+        let pk = keygen_pk(&kzg_params, vk, &circuit)?;
         println!("pk gen done");
         let break_points = circuit.0.builder.borrow().break_points();
         drop(circuit);

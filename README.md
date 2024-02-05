@@ -1,6 +1,6 @@
 # halo2-fhe
 
-Circuit for proving the correct encryption under BFV fully homomorphic encryption scheme. Note that this can be also generalized to any RLWE-based FHE scheme. Based on https://hackmd.io/@gaussian/HJ8DYyjPp.
+Circuit for proving the correct encryption under BFV fully homomorphic encryption scheme. Note that this can be also generalized to any RLWE-based FHE scheme. Based on https://hackmd.io/@gaussian/r1W98Kqqa.
 
 ### POC
 
@@ -16,5 +16,5 @@ python3 circuit_pk.py
 
 ```
 cargo build
-cargo test --release
+cargo test --release -- --nocapture
 ```

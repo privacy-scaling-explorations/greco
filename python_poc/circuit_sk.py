@@ -59,6 +59,9 @@ def main():
     k1 = Polynomial([crt_moduli.q]) * m
     k1.reduce_coefficients_by_modulus(t)
 
+    r2s = []
+    r1s = []
+
     # Each round of the loop simulates a proof generation phase for a different CRT basis
     for i, ciphertext in enumerate(ciphertexts):
 
@@ -69,7 +72,6 @@ def main():
         '''
 
         ct0i = ciphertext[0]
-        ct1i = ciphertext[1]
         ai = Polynomial([-1]) * ciphertext[1]
         cyclo = [1] + [0] * (n - 1) + [1]
         cyclo = Polynomial(cyclo)
@@ -118,6 +120,8 @@ def main():
         # assert that the remainder is zero
         assert rem == []
         r1 = Polynomial(quotient)
+        # assert that the degree of R1 is 2n - 2
+        assert len(r1.coefficients) - 1 == 2 * n - 2
 
         # Assert that ct0i = ct0i_hat + r1 * qi + r2 * cyclo mod Zp
         lhs = ct0i
@@ -126,7 +130,6 @@ def main():
         # remove the leading zeroes from rhs until the length of rhs.coefficients is equal to n
         while len(rhs.coefficients) > n and rhs.coefficients[0] == 0:
             rhs.coefficients.pop(0)
-
 
         assert lhs == rhs
 
@@ -282,5 +285,23 @@ def main():
         rhs = (ai_alpha * s_alpha + e_alpha + (k1_alpha * k0i.coefficients[0]) + (r1_alpha * qis[i]) + (r2_alpha * cyclo_alpha))
 
         assert lhs % p == rhs % p
+
+        r1s.append(r1_assigned)
+        r2s.append(r2_assigned)
+
+    # Parse the inputs into a JSON format such this can be used as input for the (real) circuit
+    json_input = {
+        "s": [str(coef) for coef in s_assigned.coefficients],
+        "e": [str(coef) for coef in e_assigned.coefficients],
+        "k1": [str(coef) for coef in k1_assigned.coefficients],
+        "r2s": [[str(coef) for coef in r2.coefficients] for r2 in r2s],
+        "r1s": [[str(coef) for coef in r1.coefficients] for r1 in r1s],
+    }
+
+    # write the inputs to a a json file
+    import json
+    with open('./src/data/sk_enc_input.json', 'w') as f:
+        json.dump(json_input, f)
+
 
 main()
