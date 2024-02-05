@@ -10,8 +10,8 @@ use halo2_base::{
 };
 use serde::Deserialize;
 
+use crate::constants::sk_enc::{E_BOUND, K1_BOUND, N, R1_BOUNDS, R2_BOUNDS};
 use crate::utils::evaluate_poly;
-
 const K: usize = 18;
 
 /// Helper function to define the parameters of the RlcCircuit
@@ -40,40 +40,6 @@ pub struct BfvSkEncryptionCircuit {
     r2s: Vec<Vec<String>>,
     r1s: Vec<Vec<String>>,
 }
-
-/// `N` is the degree of the cyclotomic polynomial defining the rings Rq and Rt.
-/// We define it as a constant because it should be known at compile time
-const N: usize = 1024;
-
-/// `B` is the upper bound of the gaussian distribution used to sample the error polynomial `e`
-/// We define it as a constant because it should be known at compile time
-const B: u64 = 19;
-
-/// `qis` is a vector representing the moduli used for the CRT decomposition of the modulus `q`, which is the modulus of the ring Rq
-/// We define it as a constant because it should be known at compile time
-const QIS: [u64; 15] = [
-    1152921504606584833,
-    1152921504598720513,
-    1152921504597016577,
-    1152921504595968001,
-    1152921504595640321,
-    1152921504593412097,
-    1152921504592822273,
-    1152921504592429057,
-    1152921504589938689,
-    1152921504586530817,
-    1152921504585547777,
-    1152921504583647233,
-    1152921504581877761,
-    1152921504581419009,
-    1152921504580894721,
-];
-
-/// `t` is the plaintext modulus used for the BFV encryption scheme
-/// We define it as a constant because it should be known at compile time
-const T: u64 = 65537;
-
-const R1_0_BOUND: u64 = 1321;
 
 /// Payload returned by the first phase of the circuit to be reused in the second phase
 pub struct Payload<F: ScalarField> {
@@ -160,44 +126,39 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
         }
 
         // perform range check on the coefficients of `e`
-
-        let e_bound = B;
-        let e_bound_constant = Constant(F::from(B));
+        let e_bound_constant = Constant(F::from(E_BOUND));
 
         for i in 0..N {
             let normalized_coeff = range.gate().add(ctx, e_assigned[i], e_bound_constant);
             // TODO: we can make this a bit more efficient by not having to reassign b as a constant every time
-            range.check_less_than_safe(ctx, normalized_coeff, 2 * e_bound);
+            range.check_less_than_safe(ctx, normalized_coeff, 2 * E_BOUND);
         }
 
         // perform range check on the coefficients of `k1`
 
-        let k1_bound = (T - 1) / 2;
-        let k1_bound_constant = Constant(F::from(k1_bound));
+        let k1_bound_constant = Constant(F::from(K1_BOUND));
 
         for i in 0..N {
             let normalized_coeff = range.gate().add(ctx, k1_assigned[i], k1_bound_constant);
-            range.check_less_than_safe(ctx, normalized_coeff, 2 * k1_bound);
+            range.check_less_than_safe(ctx, normalized_coeff, 2 * K1_BOUND);
         }
 
         // perform range check on the coefficients of `r2[0]`. Note that the degree of R2 is N - 2
 
-        let r2_0_bound = QIS[0] - 1 / 2;
-        let r2_0_bound_constant = Constant(F::from(r2_0_bound));
+        let r2_0_bound_constant = Constant(F::from(R2_BOUNDS[0]));
 
         for i in 0..(N - 1) {
             let normalized_coeff = range.gate().add(ctx, r2_0_assigned[i], r2_0_bound_constant);
-            range.check_less_than_safe(ctx, normalized_coeff, 2 * r2_0_bound);
+            range.check_less_than_safe(ctx, normalized_coeff, 2 * R2_BOUNDS[0]);
         }
 
         // perform range check on the coefficients of `r1[0]`. Note that the degree of R1 is 2N - 2
 
-        let r1_0_bound = R1_0_BOUND;
-        let r1_0_bound_constant = Constant(F::from(r1_0_bound));
+        let r1_0_bound_constant = Constant(F::from(R1_BOUNDS[0]));
 
         for i in 0..(2 * N - 1) {
             let normalized_coeff = range.gate().add(ctx, r1_0_assigned[i], r1_0_bound_constant);
-            range.check_less_than_safe(ctx, normalized_coeff, 2 * r1_0_bound);
+            range.check_less_than_safe(ctx, normalized_coeff, 2 * R1_BOUNDS[0]);
         }
 
         Payload {

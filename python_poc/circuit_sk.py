@@ -6,8 +6,10 @@ from bfv.utils import mod_inverse
 from random import randint
 import copy
 from utils import assign_to_circuit
+import argparse
+import json
 
-def main(): 
+def main(args): 
     
     '''
     ENCRYPTION PHASE - performed outside the circuit
@@ -15,26 +17,12 @@ def main():
     In this phase, the encryption operation is performed. Later, the circuit will be used to prove that the encryption was performed correctly.
     '''
 
-    qis = [
-        1152921504606584833,
-        1152921504598720513,
-        1152921504597016577,
-        1152921504595968001,
-        1152921504595640321,
-        1152921504593412097,
-        1152921504592822273,
-        1152921504592429057,
-        1152921504589938689,
-        1152921504586530817,
-        1152921504585547777,
-        1152921504583647233,
-        1152921504581877761,
-        1152921504581419009,
-        1152921504580894721,
-    ]
+    n = args.n
+    qis = args.qis
+    qis = json.loads(qis)
+    t = args.t
+
     crt_moduli = CRTModuli(qis)
-    t = 65537
-    n = 1024
     sigma = 3.2
     discrete_gaussian = DiscreteGaussian(sigma)
     bfv_crt = BFVCrt(crt_moduli, n, t, discrete_gaussian)
@@ -61,6 +49,8 @@ def main():
 
     r2s = []
     r1s = []
+    r1_bounds = []
+    r2_bounds = []
 
     # Each round of the loop simulates a proof generation phase for a different CRT basis
     for i, ciphertext in enumerate(ciphertexts):
@@ -137,7 +127,6 @@ def main():
         CIRCUIT - PHASE 1 - ASSIGNMENT PHASE
 
         In this phase, the polynomials belonging to the matrix S are assigned to the circuit.
-        We also assign the public inputs qi, t, k0i and b, while N is a constant of the circuit.
         '''
 
         # ... Perform assignment here and expose public inputs...
@@ -195,13 +184,14 @@ def main():
         assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
 
         # constraint. The coefficients of R2 should be in the range [-(qi-1)/2, (qi-1)/2]
-        bound = int((qis[i] - 1) / 2)
-        assert all(coeff >= -bound and coeff <= bound for coeff in r2.coefficients)
-        # After the circuit assignement, the coefficients of r2_assigned must be in [0, bound] or [p - bound, p - 1] (the normalization is constrained inside the circuit)
-        assert all(coeff in range(0, int(bound) + 1) or coeff in range(p - int(bound), p) for coeff in r2_assigned.coefficients)
-        # To perform a range check with a smaller lookup table, we normalize the coefficients of r2_assigned to be in [0, 2*bound]
-        r2_normalized = Polynomial([(coeff + int(bound)) % p for coeff in r2_assigned.coefficients])
-        assert all(coeff >= 0 and coeff <= 2*bound for coeff in r2_normalized.coefficients)
+        r2_bound = int((qis[i] - 1) / 2)
+        r2_bounds.append(r2_bound)
+        assert all(coeff >= -r2_bound and coeff <= r2_bound for coeff in r2.coefficients)
+        # After the circuit assignement, the coefficients of r2_assigned must be in [0, r2_bound] or [p - r2_bound, p - 1] (the normalization is constrained inside the circuit)
+        assert all(coeff in range(0, int(r2_bound) + 1) or coeff in range(p - int(r2_bound), p) for coeff in r2_assigned.coefficients)
+        # To perform a range check with a smaller lookup table, we normalize the coefficients of r2_assigned to be in [0, 2*r2_bound]
+        r2_normalized = Polynomial([(coeff + int(r2_bound)) % p for coeff in r2_assigned.coefficients])
+        assert all(coeff >= 0 and coeff <= 2*r2_bound for coeff in r2_normalized.coefficients)
 
         # sanity check. The coefficients of R2 * cyclo should be in the range [-(qi-1)/2, (qi-1)/2]
         bound = int((qis[i] - 1) / 2)
@@ -209,13 +199,13 @@ def main():
         assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
 
         # constraint. The coefficients of k1 should be in the range [-(t-1)/2, (t-1)/2]
-        bound = int((t - 1) / 2)
-        assert all(coeff >= -bound and coeff <= bound for coeff in k1.coefficients)
-        # After the circuit assignement, the coefficients of k1_assigned must be in [0, bound] or [p - bound, p - 1] (the normalization is constrained inside the circuit)
-        assert all(coeff in range(0, int(bound) + 1) or coeff in range(p - int(bound), p) for coeff in k1_assigned.coefficients)
-        # To perform a range check with a smaller lookup table, we normalize the coefficients of k1_assigned to be in [0, 2*bound]
-        k1_normalized = Polynomial([(coeff + int(bound)) % p for coeff in k1_assigned.coefficients])
-        assert all(coeff >= 0 and coeff <= 2*bound for coeff in k1_normalized.coefficients)
+        k1_bound = int((t - 1) / 2)
+        assert all(coeff >= -k1_bound and coeff <= k1_bound for coeff in k1.coefficients)
+        # After the circuit assignement, the coefficients of k1_assigned must be in [0, k1_bound] or [p - k1_bound, p - 1] (the normalization is constrained inside the circuit)
+        assert all(coeff in range(0, int(k1_bound) + 1) or coeff in range(p - int(k1_bound), p) for coeff in k1_assigned.coefficients)
+        # To perform a range check with a smaller lookup table, we normalize the coefficients of k1_assigned to be in [0, 2*k1_bound]
+        k1_normalized = Polynomial([(coeff + int(k1_bound)) % p for coeff in k1_assigned.coefficients])
+        assert all(coeff >= 0 and coeff <= 2*k1_bound for coeff in k1_normalized.coefficients)
 
         # sanity check. The coefficients of k1 * k0i should be in the range $[-\frac{t - 1}{2} \cdot |K_i^{0}|, \frac{t - 1}{2} \cdot |K_i^{0}|]$
         bound = int((t - 1) / 2) * abs(k0i.coefficients[0])
@@ -240,6 +230,7 @@ def main():
         bound = (int((qis[i] - 1) / 2) * (n + 2) + b + int((t - 1) / 2) * abs(k0i.coefficients[0])) / qis[i]
         # round bound to the nearest integer
         bound = int(bound)
+        r1_bounds.append(bound)
         assert all(coeff >= -bound and coeff <= bound for coeff in r1.coefficients)
         # After the circuit assignement, the coefficients of r1_assigned must be in [0, bound] or [p - bound, p - 1]
         assert all(coeff in range(0, int(bound) + 1) or coeff in range(p - int(bound), p) for coeff in r1_assigned.coefficients)
@@ -258,7 +249,8 @@ def main():
 
         '''
         CIRCUIT - PHASE 2 - ASSIGNMENT PHASE
-        The public inputs are assigned to the circuit. These are the polynomials ai, cyclo, ct0i evaluated at alpha.
+        The public inputs are assigned to the circuit. 
+        These are the polynomials of the Matrix U evaluated at alpha: ai(alpha), cyclo(alpha), k0i and qi and the polynomial ct0i(alpha).
         '''
 
         # The evaluation of ai_alpha, cyclo_alpha, ct0i_alpha is performed outside the circuit
@@ -298,10 +290,32 @@ def main():
         "r1s": [[str(coef) for coef in r1.coefficients] for r1 in r1s],
     }
 
-    # write the inputs to a a json file
-    import json
-    with open('./src/data/sk_enc_input.json', 'w') as f:
+    # write the inputs to a json file
+    with open(args.output, 'w') as f:
         json.dump(json_input, f)
 
+    print(f"const N: usize = {n};")
+    print(f"const E_BOUND: u64 = {b};")
+    print(f"const R1_BOUNDS: [u64; {len(r1_bounds)}] = [{', '.join(map(str, r1_bounds))}];")
+    print(f"const R2_BOUNDS: [u64; {len(r2_bounds)}] = [{', '.join(map(str, r2_bounds))}];")
+    print(f"const K1_BOUND: u64 = {k1_bound};")
 
-main()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Generate rust constants and json inputs for BFV zk proof of secret key encryption circuit"
+    )
+    parser.add_argument(
+        "-n", type=int, required=True, help="Degree of f(x), must be a power of 2."
+    )
+    parser.add_argument(
+        "-qis", type=str, required=True, help="List of qis such that qis[i] is the modulus of the i-th CRT basis of the modulus q of the ciphertext space."
+    )
+    parser.add_argument(
+        "-t", type=int, required=True, help="Modulus t of the plaintext space."
+    )
+    parser.add_argument(
+        "-output", type=str, required=True, default="./src/data/sk_enc_input.json", help="Output file name."
+    )
+
+    args = parser.parse_args()
+    main(args)
