@@ -60,7 +60,7 @@ pub struct Payload<F: ScalarField> {
     e: Vec<String>,
     k1: Vec<String>,
     k0_0: String,
-    q0: String,
+    q_0: String,
     r2_0: Vec<String>,
     r1_0: Vec<String>,
     a_0: Vec<String>,
@@ -77,9 +77,7 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
 
     // Phase 0
     // * Assign the secret polynomials from the matrix S to the circuit
-    // * Assign the public inputs to the circuit
     // * Perform range checks on the coefficients of the secret polynomials
-    // TODO: explain what is happening here
     fn virtual_assign_phase0(
         &self,
         builder: &mut RlcCircuitBuilder<F>,
@@ -187,7 +185,7 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
             e: self.e.clone(),
             k1: self.k1.clone(),
             k0_0: self.k0is[0].clone(),
-            q0: self.qis[0].clone(),
+            q_0: self.qis[0].clone(),
             r2_0: self.r2is[0].clone(),
             r1_0: self.r1is[0].clone(),
             a_0: self.ais[0].clone(),
@@ -201,7 +199,9 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
     }
 
     // Phase 1
-    // TODO: explain what is happening here
+    // * Fetch challenge gamma from phase 0
+    // * Assign public inputs to the circuit: a_0(gamma), cyclo(gamma), k0_0, q_0, ct0_0(gamma)
+    // * Enforce that ct0_0(gamma) = a_0(gamma) * s(gamma) + e(gamma) + k1(gamma) * k0_0 + r1_0(gamma) * q_0 + r2_0(gamma) * cyclo(gamma)
     fn virtual_assign_phase1(
         builder: &mut RlcCircuitBuilder<F>,
         range: &RangeChip<F>,
@@ -213,7 +213,7 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
             e,
             k1,
             k0_0,
-            q0,
+            q_0,
             r2_0,
             r1_0,
             a_0,
@@ -228,13 +228,57 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
         let (ctx_gate, ctx_rlc) = builder.rlc_ctx_pair();
         let gamma = *rlc.gamma();
 
+        let a_0_poly = a_0
+            .iter()
+            .map(|coeff| F::from_str_vartime(coeff).unwrap())
+            .collect::<Vec<_>>();
+
+        // Assign a_0(gamma) to the circuit
+        let a_0_eval_at_gamma = evaluate_poly(&a_0_poly, gamma);
+        let a_0_eval_at_gamma_assigned = ctx_gate.load_witness(a_0_eval_at_gamma);
+
+        // TODO: expose a_0_eval_at_gamma_assigned as a public input
+
+        // cyclo poly is equal to x^N + 1
+        let mut cyclo_poly = vec![F::from(0); N + 1];
+        cyclo_poly[0] = F::from(1);
+        cyclo_poly[N] = F::from(1);
+
+        // Assign cyclo(gamma) to the circuit
+        let cyclo_eval_at_gamma = evaluate_poly(&cyclo_poly, gamma);
+        let cyclo_eval_at_gamma_assigned = ctx_gate.load_witness(cyclo_eval_at_gamma);
+
+        // TODO: expose cyclo_eval_at_gamma_assigned as a public input
+
+        // Assign k0_0 to the circuit
+        let k0_0_assigned = ctx_gate.load_witness(F::from_str_vartime(&k0_0).unwrap());
+
+        // TODO: expose k0_0_assigned as a public input
+
+        // Assign q_0 to the circuit
+        let q_0_assigned = ctx_gate.load_witness(F::from_str_vartime(&q_0).unwrap());
+
+        // TODO: expose q_0_assigned as a public input
+
+        let ct0_0_poly = ct0_0
+            .iter()
+            .map(|coeff| F::from_str_vartime(coeff).unwrap())
+            .collect::<Vec<_>>();
+
+        // Assign ct0_0(gamma) to the circuit
+        let ct0_0_eval_at_gamma = evaluate_poly(&ct0_0_poly, gamma);
+        let ct0_0_eval_at_gamma_assigned = ctx_gate.load_witness(ct0_0_eval_at_gamma);
+
+        // TODO: expose ct0_0_eval_at_gamma_assigned as a public input
+
         let rlc_trace_s = rlc.compute_rlc_fixed_len(ctx_rlc, s_assigned);
         let rlc_trace_e = rlc.compute_rlc_fixed_len(ctx_rlc, e_assigned);
         let rlc_trace_k1 = rlc.compute_rlc_fixed_len(ctx_rlc, k1_assigned);
         let rlc_trace_r2_0 = rlc.compute_rlc_fixed_len(ctx_rlc, r2_0_assigned);
         let rlc_trace_r1_0 = rlc.compute_rlc_fixed_len(ctx_rlc, r1_0_assigned);
 
-        // assert the correctness of the RLC
+        // SANITY CHECK
+        // assert the correctness of the RLC for s, e, k1, r2_0, r1_0
         let s_poly = s
             .iter()
             .map(|coeff| F::from_str_vartime(coeff).unwrap())
@@ -289,32 +333,7 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
             &expected_poly_r1_0_eval_at_gamma
         );
 
-        let a_0_poly = a_0
-            .iter()
-            .map(|coeff| F::from_str_vartime(coeff).unwrap())
-            .collect::<Vec<_>>();
-
-        // Assign a_0(gamma) to the circuit
-        let a_0_eval_at_gamma = evaluate_poly(&a_0_poly, gamma);
-        let assigned_poly_a_0_eval_at_gamma = ctx_gate.load_witness(a_0_eval_at_gamma);
-
-        // cyclo poly is equal to x^N + 1
-        let mut cyclo_poly = vec![F::from(0); N + 1];
-        cyclo_poly[0] = F::from(1);
-        cyclo_poly[N] = F::from(1);
-
-        // Assign cyclo(gamma) to the circuit
-        let cyclo_eval_at_gamma = evaluate_poly(&cyclo_poly, gamma);
-        let assigned_poly_cyclo_eval_at_gamma = ctx_gate.load_witness(cyclo_eval_at_gamma);
-
-        let ct0_0_poly = ct0_0
-            .iter()
-            .map(|coeff| F::from_str_vartime(coeff).unwrap())
-            .collect::<Vec<_>>();
-
-        // Assign ct0_0(gamma) to the circuit
-        let ct0_0_eval_at_gamma = evaluate_poly(&ct0_0_poly, gamma);
-        let assigned_poly_ct0_0_eval_at_gamma = ctx_gate.load_witness(ct0_0_eval_at_gamma);
+        // SANITY CHECK OVER
 
         // Prove that LHS(gamma) = RHS(gamma)
         // LHS = ct0_0(gamma)
@@ -323,37 +342,29 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
         let gate = range.gate();
 
         // rhs_0 = a_0(gamma) * s(gamma)
-        let rhs_0 = gate.mul(
-            ctx_gate,
-            assigned_poly_a_0_eval_at_gamma,
-            rlc_trace_s.rlc_val,
-        );
+        let rhs_0 = gate.mul(ctx_gate, a_0_eval_at_gamma_assigned, rlc_trace_s.rlc_val);
 
         // rhs_1 = e(gamma)
         let rhs_1 = rlc_trace_e.rlc_val;
 
-        let k0_0_assigned = ctx_gate.load_witness(F::from_str_vartime(&k0_0).unwrap());
-
         // rhs_2 = k1(gamma) * k0_0
         let rhs_2 = gate.mul(ctx_gate, rlc_trace_k1.rlc_val, k0_0_assigned);
 
-        let q0_assigned = ctx_gate.load_witness(F::from_str_vartime(&q0).unwrap());
-
         // rhs_3 = r1_0(gamma) * q_0
-        let rhs_3 = gate.mul(ctx_gate, rlc_trace_r1_0.rlc_val, q0_assigned);
+        let rhs_3 = gate.mul(ctx_gate, rlc_trace_r1_0.rlc_val, q_0_assigned);
 
         // rhs_4 = r2_0(gamma) * cyclo(gamma)
         let rhs_4 = gate.mul(
             ctx_gate,
             rlc_trace_r2_0.rlc_val,
-            assigned_poly_cyclo_eval_at_gamma,
+            cyclo_eval_at_gamma_assigned,
         );
 
         let rhs_01 = gate.add(ctx_gate, rhs_0, rhs_1);
         let rhs_23 = gate.add(ctx_gate, rhs_2, rhs_3);
         let rhs_0123 = gate.add(ctx_gate, rhs_01, rhs_23);
         let rhs = gate.add(ctx_gate, rhs_0123, rhs_4);
-        let lhs = assigned_poly_ct0_0_eval_at_gamma;
+        let lhs = ct0_0_eval_at_gamma_assigned;
 
         let res = gate.sub(ctx_gate, lhs, rhs);
         gate.assert_is_const(ctx_gate, &res, &F::from(0));
@@ -370,7 +381,11 @@ mod test {
     use axiom_eth::rlc::{circuit::builder::RlcCircuitBuilder, utils::executor::RlcExecutor};
     use halo2_base::{
         gates::circuit::CircuitBuilderStage,
-        halo2_proofs::{dev::MockProver, halo2curves::bn256::Fr},
+        halo2_proofs::{
+            dev::{FailureLocation, MockProver, VerifyFailure},
+            halo2curves::bn256::Fr,
+            plonk::{Any, SecondPhase},
+        },
     };
 
     #[test]
@@ -388,11 +403,106 @@ mod test {
             RlcCircuitBuilder::from_stage(CircuitBuilderStage::Mock, 0).use_params(params);
         mock_builder.base.set_lookup_bits(8); // Set the lookup bits to 8
 
-        let circuit = RlcExecutor::new(mock_builder, circuit);
+        let rlc_circuit = RlcExecutor::new(mock_builder, circuit);
 
         // 3. Run the mock prover. The circuit should be satisfied
-        MockProver::run(K as u32, &circuit, vec![])
+        MockProver::run(K as u32, &rlc_circuit, vec![])
             .unwrap()
             .assert_satisfied();
+    }
+
+    #[test]
+    pub fn test_sk_enc_invalid_range() {
+        // 1. Define the inputs of the circuit
+        let file_path = "src/data/sk_enc_input.json";
+        let mut file = File::open(file_path).unwrap();
+        let mut data = String::new();
+        file.read_to_string(&mut data).unwrap();
+        let mut circuit = serde_json::from_str::<BfvSkEncryptionCircuit>(&data).unwrap();
+
+        // 2. Invalidate the circuit by setting the value of a coefficient of the polynomial `s` to be out of range
+        let out_of_range_s = "2";
+
+        circuit.s[0] = out_of_range_s.to_string();
+
+        // 3. Build the circuit for MockProver
+        let params = test_params();
+        let mut mock_builder: RlcCircuitBuilder<Fr> =
+            RlcCircuitBuilder::from_stage(CircuitBuilderStage::Mock, 0).use_params(params);
+        mock_builder.base.set_lookup_bits(8); // Set the lookup bits to 8
+
+        let rlc_circuit = RlcExecutor::new(mock_builder, circuit);
+
+        // 4. Run the mock prover
+        let invalid_prover = MockProver::run(K as u32, &rlc_circuit, vec![]).unwrap();
+
+        // 5. Assert that the circuit is not satisfied
+        // In particular, it should fail the range check enforced in the first phase and the equality check in the second phase
+        assert_eq!(
+            invalid_prover.verify(),
+            Err(vec![
+                VerifyFailure::Lookup {
+                    name: "lookup".to_string(),
+                    lookup_index: 0,
+                    location: FailureLocation::OutsideRegion { row: 6146 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::Fixed, 1).into(),
+                    location: FailureLocation::InRegion {
+                        region: (2, "base+rlc phase 1").into(),
+                        offset: 0
+                    }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 37 }
+                }
+            ])
+        );
+    }
+
+    #[test]
+    pub fn test_sk_enc_invalid_polys() {
+        // 1. Define the inputs of the circuit
+        let file_path = "src/data/sk_enc_input.json";
+        let mut file = File::open(file_path).unwrap();
+        let mut data = String::new();
+        file.read_to_string(&mut data).unwrap();
+        let mut circuit = serde_json::from_str::<BfvSkEncryptionCircuit>(&data).unwrap();
+
+        // 2. Invalidate the circuit by setting a different `s` polynomial
+        let invalid_s = vec!["1".to_string(); 1024];
+
+        circuit.s = invalid_s;
+
+        // 3. Build the circuit for MockProver
+        let params = test_params();
+        let mut mock_builder: RlcCircuitBuilder<Fr> =
+            RlcCircuitBuilder::from_stage(CircuitBuilderStage::Mock, 0).use_params(params);
+        mock_builder.base.set_lookup_bits(8); // Set the lookup bits to 8
+
+        let rlc_circuit = RlcExecutor::new(mock_builder, circuit);
+
+        // 4. Run the mock prover
+        let invalid_prover = MockProver::run(K as u32, &rlc_circuit, vec![]).unwrap();
+
+        // 5. Assert that the circuit is not satisfied
+        // In particular, it should only fail the equality check in the second phase
+        assert_eq!(
+            invalid_prover.verify(),
+            Err(vec![
+                VerifyFailure::Permutation {
+                    column: (Any::Fixed, 1).into(),
+                    location: FailureLocation::InRegion {
+                        region: (2, "base+rlc phase 1").into(),
+                        offset: 0
+                    }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 37 }
+                }
+            ])
+        );
     }
 }

@@ -224,26 +224,26 @@ def main(args):
         k1_normalized = Polynomial([(coeff + int(k1_bound)) % p for coeff in k1_assigned.coefficients])
         assert all(coeff >= 0 and coeff <= 2*k1_bound for coeff in k1_normalized.coefficients)
 
-        # sanity check. The coefficients of k1 * k0i should be in the range $[-\frac{t - 1}{2} \cdot |K_i^{0}|, \frac{t - 1}{2} \cdot |K_i^{0}|]$
+        # sanity check. The coefficients of k1 * k0i should be in the range $[-\frac{t - 1}{2} \cdot |K_{0,i}|, \frac{t - 1}{2} \cdot |K_{0,i}|]$
         bound = int((t - 1) / 2) * abs(k0i.coefficients[0])
         res = k1 * k0i
         assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
 
-        # sanity check. The coefficients of ct0i_hat (ai * s + e + k1 * k0i) should be in the range $[- (N \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|), N \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|]$
+        # sanity check. The coefficients of ct0i_hat (ai * s + e + k1 * k0i) should be in the range $[- (N \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_{0,i}|), N \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_{0,i}|]$
         bound = int((qis[i] - 1) / 2) * n + b + int((t - 1) / 2) * abs(k0i.coefficients[0])
         assert all(coeff >= -bound and coeff <= bound for coeff in ct0i_hat.coefficients)
 
-        # sanity check. The coefficients of ct0i - ct0i_hat should be in the range $ [- ((N+1) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|), (N+1) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|]$
+        # sanity check. The coefficients of ct0i - ct0i_hat should be in the range $ [- ((N+1) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_{0,i}|), (N+1) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_{0,i}|]$
         bound = int((qis[i] - 1) / 2) * (n + 1) + b + int((t - 1) / 2) * abs(k0i.coefficients[0])
         sub = ct0i + (Polynomial([-1]) * ct0i_hat)
         assert all(coeff >= -bound and coeff <= bound for coeff in sub.coefficients)
 
-        # sanity check. The coefficients of ct0i - ct0i_hat - r2i * cyclo should be in the range $[- ((N+2) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|), (N+2) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|]$
+        # sanity check. The coefficients of ct0i - ct0i_hat - r2i * cyclo should be in the range $[- ((N+2) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_{0,i}|), (N+2) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_{0,i}|]$
         bound = ((qis[i] - 1) / 2) * (n + 2) + b + ((t - 1) / 2) * abs(k0i.coefficients[0])
         sub = ct0i + (Polynomial([-1]) * ct0i_hat) + Polynomial([-1]) * (r2i * cyclo)
         assert all(coeff >= -bound and coeff <= bound for coeff in sub.coefficients)
 
-        # constraint. The coefficients of (ct0i - ct0i_hat - r2i * cyclo) / qi = r1i should be in the range $[\frac{- ((N+2) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_i^{0}|)}{q_i}, \frac{(N+2) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_i^{0}|}{q_i}]$
+        # constraint. The coefficients of (ct0i - ct0i_hat - r2i * cyclo) / qi = r1i should be in the range $[\frac{- ((N+2) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_{0,i}|)}{q_i}, \frac{(N+2) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_{0,i}|}{q_i}]$
         r1i_bound = (int((qis[i] - 1) / 2) * (n + 2) + b + int((t - 1) / 2) * abs(k0i.coefficients[0])) / qis[i]
         # round bound to the nearest integer
         r1i_bound = int(r1i_bound)
@@ -266,8 +266,12 @@ def main(args):
 
         '''
         CIRCUIT - PHASE 2 - ASSIGNMENT PHASE
-        The public inputs are assigned to the circuit. 
-        These are the polynomials of the Matrix U evaluated at alpha: ai(alpha), cyclo(alpha), k0i and qi and the polynomial ct0i(alpha).
+        The public inputs are assigned to the circuit. These are:
+        * a_0(alpha)
+        * cyclo(alpha)
+        * k0_0
+        * q0
+        * ct0_0(alpha)
         '''
 
         # The evaluation of ai_alpha, cyclo_alpha, ct0i_alpha is performed outside the circuit

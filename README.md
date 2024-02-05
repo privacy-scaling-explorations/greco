@@ -40,7 +40,7 @@ const R2_BOUNDS: [u64; 15] = [576460752303292416, 576460752299360256, 5764607522
 const K1_BOUND: u64 = 32768;
 ```
 
-These constants are then to be added to `src/constants/sk_enc.rs` file.
+These constants are then to be added to `src/constants/sk_enc.rs` file. Note that we define them as constants and not as inputs because these should be known at compile time.
 
 ### Circuit
 
