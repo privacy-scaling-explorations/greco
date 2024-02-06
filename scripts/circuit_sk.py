@@ -47,37 +47,31 @@ def main(args):
     k1 = Polynomial([crt_moduli.q]) * m
     k1.reduce_coefficients_by_modulus(t)
 
-    # `k0is` are the negative multiplicative inverses of t modulo each qi. These are normalized to be in the range [0, p), where p is the modulus of the prime field of the circuit
-    k0is = []
-
-    # `r2is` are the polynomials r2i for each CRT basis. The coefficients are normalized to be in the range [0, p), where p is the modulus of the prime field of the circuit
-    r2is = []
-
-    # `r1is` are the polynomials r1i for each CRT basis. The coefficients normalized to be in the range [0, p), where p is the modulus of the prime field of the circuit
-    r1is = []
-
-    # `r1_bounds` are the bounds for the coefficients of r1i for each CRT basis
-    r1_bounds = []
-
-    # `r2_bounds` are the bounds for the coefficients of r2i for each CRT basis
-    r2_bounds = []
-
-    # `ct0is` are the polynomials ct0i for each CRT basis. The coefficients normalized to be in the range [0, p), where p is the modulus of the prime field of the circuit
-    ct0is = []
-
-    # `ais` are the polynomials ai for each CRT basis. The coefficients normalized to be in the range [0, p), where p is the modulus of the prime field of the circuit
-    ais= []
-
+    # `p` is the modulus of the prime field of the circuit
     p = 21888242871839275222246405745257275088548364400416034343698204186575808495617
 
-    # Each round of the loop simulates a proof generation phase for a different CRT basis
+    # `r2is` are the polynomials r2i for each i-th CRT basis.
+    r2is = []
+
+    # `r1is` are the polynomials r1i for each i-th CRT basis.
+    r1is = []
+
+    # `k0is` are the negative multiplicative inverses of t modulo each qi.
+    k0is = []
+
+    # `ct0is` are the polynomials ct0i for each CRT basis. 
+    ct0is = []
+
+    # `ct0is_hat` are the polynomials ct0i_hat for each CRT basis.
+    ct0is_hat = []
+
+    '''
+    SETUP PHASE - performed outside the circuit
+
+    For each CRT basis, we need to compute the polynomials r1i and r2i (check this doc for more details: https://hackmd.io/@gaussian/r1W98Kqqa)
+    '''
+
     for i, ciphertext in enumerate(ciphertexts):
-
-        '''
-        SETUP PHASE - performed outside the circuit
-
-        For each CRT basis, we need to compute the polynomials r1i and r2i (check this doc for more details: https://hackmd.io/@gaussian/HJ8DYyjPp)
-        '''
 
         ct0i = ciphertext[0]
         ai = Polynomial([-1]) * ciphertext[1]
@@ -141,211 +135,250 @@ def main(args):
 
         assert lhs == rhs
 
-        '''
-        CIRCUIT - PHASE 0 - ASSIGNMENT PHASE
+        r2is.append(r2i)
+        r1is.append(r1i)
+        k0is.append(k0i)
+        ct0is.append(ct0i)
+        ct0is_hat.append(ct0i_hat)
 
-        In this phase, all the polynomials are assigned to the circuit. Namely:
-        * polynomial ai and the scalars qi and k0i from the matrix Ui
-        * polynomials s, e, k, r1i, r2i from the matrix Si
-        * polynomials ct0i
+    # `r1_bounds` are the bounds for the coefficients of r1i for each CRT basis
+    r1_bounds = []
 
-        The cyclotomic polynomial is not assigned to the circuit, as this is not an input but a constant parameter.
+    # `r2_bounds` are the bounds for the coefficients of r2i for each CRT basis
+    r2_bounds = []
 
-        ai, qi, k0i and ct0i are exposed as public inputs, while the other polynomials are kept private.
-        '''
+    '''
+    CIRCUIT - PHASE 0 - ASSIGNMENT PHASE
 
-        # ... Perform assignment here and expose public inputs...
+    In this phase, the polynomials for each matrix `Si` are assigned to the circuit. Namely:
+    * polynomials `s`, `e`, `k1` are assigned only once as common to each `Si` matrix
+    * polynomials `r1i`, `r2i` are assigned for each `Si` matrix
+    '''
 
-        # Every assigned value must be an element of the field Zp. Negative values `-z` are assigned as `p - z`
-        ai_assigned = assign_to_circuit(ai, p)
-        k0i_assigned = assign_to_circuit(k0i, p).coefficients[0]
-        qi_assigned = assign_to_circuit(Polynomial([qis[i]]), p).coefficients[0]
-        ct0i_assigned = assign_to_circuit(ct0i, p)
-        s_assigned = assign_to_circuit(s, p)
-        e_assigned = assign_to_circuit(e, p)
-        k1_assigned = assign_to_circuit(k1, p)
-        r1i_assigned = assign_to_circuit(r1i, p)
-        r2i_assigned = assign_to_circuit(r2i, p)
+    # Every assigned value must be an element of the field Zp. Negative coefficients `-z` are assigned as `p - z`
+    s_assigned = assign_to_circuit(s, p)
+    e_assigned = assign_to_circuit(e, p)
+    k1_assigned = assign_to_circuit(k1, p)
 
-        '''
-        CIRCUIT - PHASE 0 - RANGE CHECK OF PRIVATE POLYNOMIALS 
+    r1is_assigned = []
+    r2is_assigned = []
 
-        In this phase, the coefficients of the private polynomials from matrix Si are checked to be in the correct range.
-        '''
+    for i in range(len(ciphertexts)):
+        r1i_assigned = assign_to_circuit(r1is[i], p)
+        r2i_assigned = assign_to_circuit(r2is[i], p)
+        r1is_assigned.append(r1i_assigned)
+        r2is_assigned.append(r2i_assigned)
 
-        # ... Perform range check here ...
 
+    '''
+    CIRCUIT - END OF PHASE 0 - WITNESS COMMITMENT 
+
+    At the end of phase 0, the witness is committed and hashed and a challenge is extracted from the hash (Fiat-Shamir heuristic).
+    '''
+
+    # For the sake of simplicity, we generate a random challenge here
+    alpha = randint(0, 1000)
+
+    '''
+    CIRCUIT - PHASE 1 - ASSIGNMENT PHASE
+
+    Challenge alpha is fetched from phase 0 and used to evaluate the public polynomials at alpha. 
+    These public polynomials are `ai`, `cyclo` and `ct0i`.
+    The evaluation of these polynomials at alpha is performed outside the circuit and the evaluation is assigned to the circuit and exposed as public inputs.
+    Further public inputs assigned to the circuit are the scalars `qi` and `k0i`.
+
+    * Assign to the polynomial `ai(alpha)`, `cyclo(alpha)`, `ct0i(alpha)` and the scalars `qi` and `k0i` to the circuit.
+    * Expose them as public inputs.
+    '''
+
+    # Every assigned value must be an element of the field Zp. Negative coefficients `-z` are assigned as `p - z`
+    ais_at_alpha_assigned = []
+    ct0is_alpha_assigned = []
+    qis_assigned = []
+    k0is_assigned = []
+
+    for i in range(len(ciphertexts)):
+        ai_alpha = ais[i].evaluate(alpha)
+        ai_alpha_assigned = assign_to_circuit(Polynomial([ai_alpha]), p).coefficients[0]
+        ais_at_alpha_assigned.append(ai_alpha_assigned)
+
+        ct0i_alpha = ciphertexts[i][0].evaluate(alpha)
+        ct0i_alpha_assigned = assign_to_circuit(Polynomial([ct0i_alpha]), p).coefficients[0]
+        ct0is_alpha_assigned.append(ct0i_alpha_assigned)
+
+        qis_assigned.append(qis[i])
+
+        k0i_assigned = assign_to_circuit(k0is[i], p).coefficients[0]
+        k0is_assigned.append(k0i_assigned)
+
+    cyclo_alpha = cyclo.evaluate(alpha)
+    cyclo_alpha_assigned = assign_to_circuit(Polynomial([cyclo_alpha]), p).coefficients[0]
+
+    '''
+    CIRCUIT - PHASE 1 - RANGE CHECK OF PRIVATE POLYNOMIALS 
+
+    In this phase, the coefficients of the private polynomials from matrix Si are checked to be in the correct range.
+    * polynomials `s`, `e`, `k1` are range checked only once as common to each `Si` matrix
+    * polynomials `r1i`, `r2i` are range checked for each `Si` matrix
+    '''
+
+    # constraint. The coefficients of s should be in the range [-1, 0, 1]
+    assert all(coeff in [-1, 0, 1] for coeff in s.coefficients)
+    # After the circuit assignement, the coefficients of s_assigned must be in [0, 1, p - 1]
+    assert all(coeff in [0, 1, p - 1] for coeff in s_assigned.coefficients)
+    # To perform a range check with a smaller lookup table, we shift the coefficients of s_assigned to be in [0, 1, 2] (the shift operation is constrained inside the circuit)
+    s_shifted = Polynomial([(coeff + 1) % p for coeff in s_assigned.coefficients])
+    assert all(coeff in [0, 1, 2] for coeff in s_shifted.coefficients)
+
+    # constraint. The coefficients of e should be in the range [-B, B] where B is the upper bound of the discrete Gaussian distribution
+    b = int(discrete_gaussian.z_upper)
+    assert all(coeff >= -b and coeff <= b for coeff in e.coefficients)
+    # After the circuit assignement, the coefficients of e_assigned must be in [0, B] or [p - B, p - 1]
+    assert all(coeff in range(0, b+1) or coeff in range(p - b, p) for coeff in e_assigned.coefficients)
+    # To perform a range check with a smaller lookup table, we shift the coefficients of e_assigned to be in [0, 2B] (the shift operation is constrained inside the circuit)
+    e_shifted = Polynomial([(coeff + b) % p for coeff in e_assigned.coefficients])
+    assert all(coeff >= 0 and coeff <= 2*b for coeff in e_shifted.coefficients)
+
+    # constraint. The coefficients of k1 should be in the range [-(t-1)/2, (t-1)/2]
+    k1_bound = int((t - 1) / 2)
+    assert all(coeff >= -k1_bound and coeff <= k1_bound for coeff in k1.coefficients)
+    # After the circuit assignement, the coefficients of k1_assigned must be in [0, k1_bound] or [p - k1_bound, p - 1] 
+    assert all(coeff in range(0, int(k1_bound) + 1) or coeff in range(p - int(k1_bound), p) for coeff in k1_assigned.coefficients)
+    # To perform a range check with a smaller lookup table, we shift the coefficients of k1_assigned to be in [0, 2*k1_bound] (the shift operation is constrained inside the circuit)
+    k1_shifted = Polynomial([(coeff + int(k1_bound)) % p for coeff in k1_assigned.coefficients])
+    assert all(coeff >= 0 and coeff <= 2*k1_bound for coeff in k1_shifted.coefficients)
+
+    for i in range(len(ciphertexts)):
         # sanity check. The coefficients of ct0i should be in the range [-(qi-1)/2, (qi-1)/2]
         bound = int((qis[i] - 1) / 2)
-        assert all(coeff >= -bound and coeff <= bound for coeff in ct0i.coefficients)
+        assert all(coeff >= -bound and coeff <= bound for coeff in ct0is[i].coefficients)
 
         # sanity check. The coefficients of ai should be in the range [-(qi-1)/2, (qi-1)/2]
         bound = int((qis[i] - 1) / 2)
-        assert all(coeff >= -bound and coeff <= bound for coeff in ai.coefficients)
+        assert all(coeff >= -bound and coeff <= bound for coeff in ais[i].coefficients)
 
-        # constraint. The coefficients of s should be in the range [-1, 0, 1]
-        assert all(coeff in [-1, 0, 1] for coeff in s.coefficients)
-        # After the circuit assignement, the coefficients of s_assigned must be in [0, 1, p - 1]
-        assert all(coeff in [0, 1, p - 1] for coeff in s_assigned.coefficients)
-        # To perform a range check with a smaller lookup table, we normalize the coefficients of s_assigned to be in [0, 1, 2] (the normalization is constrained inside the circuit)
-        s_normalized = Polynomial([(coeff + 1) % p for coeff in s_assigned.coefficients])
-        assert all(coeff in [0, 1, 2] for coeff in s_normalized.coefficients)
-        
         # sanity check. The coefficients of ai * s should be in the range $[-N \cdot \frac{q_i - 1}{2}, N \cdot \frac{q_i - 1}{2}]$
         bound = int((qis[i] - 1) / 2) * n
-        res = ai * s
+        res = ais[i] * s
         assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
-
-        # constraint. The coefficients of e should be in the range [-B, B] where B is the upper bound of the discrete Gaussian distribution
-        b = int(discrete_gaussian.z_upper)
-        assert all(coeff >= -b and coeff <= b for coeff in e.coefficients)
-        # After the circuit assignement, the coefficients of e_assigned must be in [0, B] or [p - B, p - 1] (the normalization is constrained inside the circuit)
-        assert all(coeff in range(0, b+1) or coeff in range(p - b, p) for coeff in e_assigned.coefficients)
-        # To perform a range check with a smaller lookup table, we normalize the coefficients of e_assigned to be in [0, 2B]
-        e_normalized = Polynomial([(coeff + b) % p for coeff in e_assigned.coefficients])
-        assert all(coeff >= 0 and coeff <= 2*b for coeff in e_normalized.coefficients)
 
         # sanity check. The coefficients of ai * s + e should be in the range $- (N \cdot \frac{q_i - 1}{2} + B), N \cdot \frac{q_i - 1}{2} + B]$
         bound = int((qis[i] - 1) / 2) * n + b
-        res = ai * s + e
+        res = ais[i] * s + e
         assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
 
         # constraint. The coefficients of r2i should be in the range [-(qi-1)/2, (qi-1)/2]
         r2i_bound = int((qis[i] - 1) / 2)
         r2_bounds.append(r2i_bound)
-        assert all(coeff >= -r2i_bound and coeff <= r2i_bound for coeff in r2i.coefficients)
-        # After the circuit assignement, the coefficients of r2i_assigned must be in [0, r2i_bound] or [p - r2i_bound, p - 1] (the normalization is constrained inside the circuit)
-        assert all(coeff in range(0, int(r2i_bound) + 1) or coeff in range(p - int(r2i_bound), p) for coeff in r2i_assigned.coefficients)
-        # To perform a range check with a smaller lookup table, we normalize the coefficients of r2i_assigned to be in [0, 2*r2i_bound]
-        r2i_normalized = Polynomial([(coeff + int(r2i_bound)) % p for coeff in r2i_assigned.coefficients])
-        assert all(coeff >= 0 and coeff <= 2*r2i_bound for coeff in r2i_normalized.coefficients)
+        assert all(coeff >= -r2i_bound and coeff <= r2i_bound for coeff in r2is[i].coefficients)
+        # After the circuit assignement, the coefficients of r2i_assigned must be in [0, r2i_bound] or [p - r2i_bound, p - 1] 
+        assert all(coeff in range(0, int(r2i_bound) + 1) or coeff in range(p - int(r2i_bound), p) for coeff in r2is_assigned[i].coefficients)
+        # To perform a range check with a smaller lookup table, we shift the coefficients of r2i_assigned to be in [0, 2*r2i_bound] (the shift operation is constrained inside the circuit)
+        r2i_shifted = Polynomial([(coeff + int(r2i_bound)) % p for coeff in r2is_assigned[i].coefficients])
+        assert all(coeff >= 0 and coeff <= 2*r2i_bound for coeff in r2i_shifted.coefficients)
 
         # sanity check. The coefficients of r2i * cyclo should be in the range [-(qi-1)/2, (qi-1)/2]
         bound = int((qis[i] - 1) / 2)
-        res = r2i * cyclo
+        res = r2is[i] * cyclo
         assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
 
-        # constraint. The coefficients of k1 should be in the range [-(t-1)/2, (t-1)/2]
-        k1_bound = int((t - 1) / 2)
-        assert all(coeff >= -k1_bound and coeff <= k1_bound for coeff in k1.coefficients)
-        # After the circuit assignement, the coefficients of k1_assigned must be in [0, k1_bound] or [p - k1_bound, p - 1] (the normalization is constrained inside the circuit)
-        assert all(coeff in range(0, int(k1_bound) + 1) or coeff in range(p - int(k1_bound), p) for coeff in k1_assigned.coefficients)
-        # To perform a range check with a smaller lookup table, we normalize the coefficients of k1_assigned to be in [0, 2*k1_bound]
-        k1_normalized = Polynomial([(coeff + int(k1_bound)) % p for coeff in k1_assigned.coefficients])
-        assert all(coeff >= 0 and coeff <= 2*k1_bound for coeff in k1_normalized.coefficients)
-
         # sanity check. The coefficients of k1 * k0i should be in the range $[-\frac{t - 1}{2} \cdot |K_{0,i}|, \frac{t - 1}{2} \cdot |K_{0,i}|]$
-        bound = int((t - 1) / 2) * abs(k0i.coefficients[0])
-        res = k1 * k0i
+        bound = int((t - 1) / 2) * abs(k0is[i].coefficients[0])
+        res = k1 * k0is[i]
         assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
 
         # sanity check. The coefficients of ct0i_hat (ai * s + e + k1 * k0i) should be in the range $[- (N \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_{0,i}|), N \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_{0,i}|]$
-        bound = int((qis[i] - 1) / 2) * n + b + int((t - 1) / 2) * abs(k0i.coefficients[0])
-        assert all(coeff >= -bound and coeff <= bound for coeff in ct0i_hat.coefficients)
+        bound = int((qis[i] - 1) / 2) * n + b + int((t - 1) / 2) * abs(k0is[i].coefficients[0])
+        assert all(coeff >= -bound and coeff <= bound for coeff in ct0is_hat[i].coefficients)
 
         # sanity check. The coefficients of ct0i - ct0i_hat should be in the range $ [- ((N+1) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_{0,i}|), (N+1) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_{0,i}|]$
-        bound = int((qis[i] - 1) / 2) * (n + 1) + b + int((t - 1) / 2) * abs(k0i.coefficients[0])
-        sub = ct0i + (Polynomial([-1]) * ct0i_hat)
+        bound = int((qis[i] - 1) / 2) * (n + 1) + b + int((t - 1) / 2) * abs(k0is[i].coefficients[0])
+        sub = ct0is[i] + (Polynomial([-1]) * ct0is_hat[i])
         assert all(coeff >= -bound and coeff <= bound for coeff in sub.coefficients)
 
         # sanity check. The coefficients of ct0i - ct0i_hat - r2i * cyclo should be in the range $[- ((N+2) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_{0,i}|), (N+2) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_{0,i}|]$
-        bound = ((qis[i] - 1) / 2) * (n + 2) + b + ((t - 1) / 2) * abs(k0i.coefficients[0])
-        sub = ct0i + (Polynomial([-1]) * ct0i_hat) + Polynomial([-1]) * (r2i * cyclo)
+        bound = ((qis[i] - 1) / 2) * (n + 2) + b + ((t - 1) / 2) * abs(k0is[i].coefficients[0])
+        sub = ct0is[i]  + (Polynomial([-1]) * ct0is_hat[i]) + Polynomial([-1]) * (r2is[i] * cyclo)
         assert all(coeff >= -bound and coeff <= bound for coeff in sub.coefficients)
 
         # constraint. The coefficients of (ct0i - ct0i_hat - r2i * cyclo) / qi = r1i should be in the range $[\frac{- ((N+2) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_{0,i}|)}{q_i}, \frac{(N+2) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_{0,i}|}{q_i}]$
-        r1i_bound = (int((qis[i] - 1) / 2) * (n + 2) + b + int((t - 1) / 2) * abs(k0i.coefficients[0])) / qis[i]
+        r1i_bound = (int((qis[i] - 1) / 2) * (n + 2) + b + int((t - 1) / 2) * abs(k0is[i].coefficients[0])) / qis[i]
         # round bound to the nearest integer
         r1i_bound = int(r1i_bound)
         r1_bounds.append(r1i_bound)
-        assert all(coeff >= -r1i_bound and coeff <= r1i_bound for coeff in r1i.coefficients)
+        assert all(coeff >= -r1i_bound and coeff <= r1i_bound for coeff in r1is[i].coefficients)
         # After the circuit assignement, the coefficients of r1i_assigned must be in [0, r1i_bound] or [p - r1i_bound, p - 1]
-        assert all(coeff in range(0, int(r1i_bound) + 1) or coeff in range(p - int(r1i_bound), p) for coeff in r1i_assigned.coefficients)
-        # To perform a range check with a smaller lookup table, we normalize the coefficients of r1i_assigned to be in [0, 2*r1i_bound]
-        r1i_normalized = Polynomial([(coeff + int(r1i_bound)) % p for coeff in r1i_assigned.coefficients])
-        assert all(coeff >= 0 and coeff <= 2*r1i_bound for coeff in r1i_normalized.coefficients)
-
-        '''
-        CIRCUIT - END OF PHASE 0 - WITNESS COMMITMENT 
-
-        At the end of phase 0, the witness is committed and a challenge is generated using the Fiat-Shamir heuristic.
-        '''
-
-        # For the sake of simplicity, we generate a random challenge here
-        alpha = randint(0, 1000)
-
-        '''
-        CIRCUIT - PHASE 1 - ASSIGNMENT PHASE
-
-        Challenge alpha is fetched from phase 0 and used to evaluate the public polynomials at alpha.
-        These polynomials are evaluate at alpha outside the circuit and the evaluation is assigned to the circuit and exposed as public inputs.
-        Since the polynomials are public from phase 0, the evaluation at alpha doesn't need to be constrained inside the circuit,
-        but can safely be performed (and verified) outside the circuit
-
-        The public inputs are assigned to the circuit. These are:
-        * ai_alpha
-        * cyclo_alpha
-        * ct0i_alpha
-        '''
-
-        # The evaluation of ai_alpha, cyclo_alpha, ct0i_alpha is performed outside the circuit
-
-        ai_alpha = ai_assigned.evaluate(alpha) 
-        cyclo_alpha = cyclo.evaluate(alpha)
-        ct0i_alpha = ct0i_assigned.evaluate(alpha)
-
-        # ... Perform assignment here and expose expose public inputs ...
+        assert all(coeff in range(0, int(r1i_bound) + 1) or coeff in range(p - int(r1i_bound), p) for coeff in r1is_assigned[0].coefficients)
+        # To perform a range check with a smaller lookup table, we shift the coefficients of r1i_assigned to be in [0, 2*r1i_bound] (the shift operation is constrained inside the circuit)
+        r1i_shifted = Polynomial([(coeff + int(r1i_bound)) % p for coeff in r1is_assigned[0].coefficients])
+        assert all(coeff >= 0 and coeff <= 2*r1i_bound for coeff in r1i_shifted.coefficients)
 
         '''
         CIRCUIT - PHASE 1 - CORRECT ENCRYPTION CONSTRAINT
 
-        We need to prove that ct0i = ct0i_hat + r1i * qi + r2i * cyclo mod Zp.
+        We need to prove that ct0i = ct0i_hat + r1i * qi + r2i * cyclo mod Zp for each i-th CRT basis.
         We do that by proving that LHS(alpha) = RHS(alpha) for a random alpha according to Scwhartz-Zippel lemma.
+
+        * Constrain the evaluation of the polynomials `s`, `e`, `k1` at alpha. Need to be performed only once as common to each `Si` matrix
+        * Constrain the evaluation of the polynomials `r1i`, `r2i` at alpha for each `Si` matrix
+        * Constrain that LHS(alpha) = RHS(alpha) for each i-th CRT basis
         '''
 
-        s_alpha = s_assigned.evaluate(alpha)
-        e_alpha = e_assigned.evaluate(alpha)
-        k1_alpha = k1_assigned.evaluate(alpha)
-        r1i_alpha = r1i_assigned.evaluate(alpha)
-        r2i_alpha = r2i_assigned.evaluate(alpha)
+        s_alpha_assigned = s_assigned.evaluate(alpha)
+        e_alpha_assigned = e_assigned.evaluate(alpha)
+        k1_alpha_assigned = k1_assigned.evaluate(alpha)
 
-        lhs = ct0i_alpha 
-        rhs = (ai_alpha * s_alpha + e_alpha + (k1_alpha * k0i_assigned) + (r1i_alpha * qi_assigned) + (r2i_alpha * cyclo_alpha))
+        for i in range(len(ciphertexts)):
+            r1i_alpha_assigned = r1is_assigned[i].evaluate(alpha)
+            r2i_alpha_assigned = r2is_assigned[i].evaluate(alpha)
+            lhs = ct0is_alpha_assigned[i]
+            rhs = (ais_at_alpha_assigned[i] * s_alpha_assigned + e_alpha_assigned + (k1_alpha_assigned * k0is_assigned[i]) + (r1i_alpha_assigned * qis_assigned[i]) + (r2i_alpha_assigned * cyclo_alpha_assigned))
+            
+            assert lhs % p == rhs % p
 
-        assert lhs % p == rhs % p
+        '''
+        VERIFICATION PHASE
 
-        # The verifier shoud fetch alpha and check that ai_alpha, cyclo_alpha, ct0i_alpha were generated correctly
-        ai_alpha == ai_assigned.evaluate(alpha)
+        The verifier has access to the public polynomials `ai` `ct0i` and `cyclo`.
+        They shoud fetch alpha and check that the public inputs `ai_alpha`, `cyclo_alpha`, `ct0i_alpha` were generated correctly
+        '''
+
         cyclo_alpha == cyclo.evaluate(alpha)
-        ct0i_alpha == ct0i_assigned.evaluate(alpha)
 
-        r1is.append(r1i_assigned)
-        r2is.append(r2i_assigned)
-        ais.append(ai_assigned)
-        ct0is.append(ct0i_assigned)
-        k0is.append(k0i_assigned)
+        for i in range(len(ciphertexts)):
+            ai_alpha == ais[i].evaluate(alpha)
+            ct0i_alpha == ciphertexts[i][0].evaluate(alpha)
 
+    # ais and ct0is need to be parsed such that their coefficients are in the range [0, p - 1]
+    ais_in_p = [assign_to_circuit(ai, p) for ai in ais]
+    ct0is_in_p = [assign_to_circuit(ct0i, p) for ct0i in ct0is]
+    
     # Parse the inputs into a JSON format such this can be used as input for the (real) circuit
     json_input = {
         "s": [str(coef) for coef in s_assigned.coefficients],
         "e": [str(coef) for coef in e_assigned.coefficients],
-        "qis": [str(qi) for qi in qis],
+        "qis": [str(qi) for qi in qis_assigned],
         "k1": [str(coef) for coef in k1_assigned.coefficients],
-        "k0is": [str(k0i) for k0i in k0is],
-        "r2is": [[str(coef) for coef in r2i.coefficients] for r2i in r2is],
-        "r1is": [[str(coef) for coef in r1i.coefficients] for r1i in r1is],
-        "ais": [[str(coef) for coef in ai.coefficients] for ai in ais],
-        "ct0is": [[str(coef) for coef in ct0i.coefficients] for ct0i in ct0is],
+        "k0is": [str(k0i) for k0i in k0is_assigned],
+        "r2is": [[str(coef) for coef in r2i.coefficients] for r2i in r2is_assigned],
+        "r1is": [[str(coef) for coef in r1i.coefficients] for r1i in r1is_assigned],
+        "ais": [[str(coef) for coef in ai_in_p.coefficients] for ai_in_p in ais_in_p],
+        "ct0is": [[str(coef) for coef in ct0i_in_p.coefficients] for ct0i_in_p in ct0is_in_p],
     }
 
     # write the inputs to a json file
     with open(args.output, 'w') as f:
         json.dump(json_input, f)
 
+    print(f"/// `N` is the degree of the cyclotomic polynomial defining the ring `Rq = Zq[X]/(X^N + 1)`.")
     print(f"pub const N: usize = {n};")
+    print(f"/// The coefficients of the polynomial `e` should exist in the interval `[-E_BOUND, E_BOUND]` where `E_BOUND` is the upper bound of the gaussian distribution with 𝜎 = 3.2")
     print(f"pub const E_BOUND: u64 = {b};")
+    print(f"/// The coefficients of the polynomials `r1is` should exist in the interval `[-R1_BOUND[i], R1_BOUND[i]]` where `R1_BOUND[i]` is equal to `(qi-1)/2`")
     print(f"pub const R1_BOUNDS: [u64; {len(r1_bounds)}] = [{', '.join(map(str, r1_bounds))}];")
+    print(f"/// The coefficients of the polynomials `r2is` should exist in the interval `[-R2_BOUND[i], R2_BOUND[i]]` where `R2_BOUND[i]` is equal to $\\frac{{(N+2) \\cdot \\frac{{q_i - 1}}{{2}} + B + \\frac{{t - 1}}{{2}} \\cdot |K_{{0,i}}|}}{{q_i}}$")
     print(f"pub const R2_BOUNDS: [u64; {len(r2_bounds)}] = [{', '.join(map(str, r2_bounds))}];")
+    print(f"/// The coefficients of `k1` should exist in the interval `[-K1_BOUND, K1_BOUND]` where `K1_BOUND` is equal to `(t-1)/2`")
     print(f"pub const K1_BOUND: u64 = {k1_bound};")
 
 if __name__ == "__main__":
