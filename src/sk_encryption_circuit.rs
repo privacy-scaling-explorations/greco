@@ -59,12 +59,12 @@ pub struct Payload<F: ScalarField> {
     s: Vec<String>,
     e: Vec<String>,
     k1: Vec<String>,
-    k0_0: String,
-    q_0: String,
     r2_0: Vec<String>,
     r1_0: Vec<String>,
     a_0: Vec<String>,
     ct0_0: Vec<String>,
+    q_0_assigned: AssignedValue<F>,
+    k0_0_assigned: AssignedValue<F>,
     s_assigned: Vec<AssignedValue<F>>,
     e_assigned: Vec<AssignedValue<F>>,
     k1_assigned: Vec<AssignedValue<F>>,
@@ -75,9 +75,16 @@ pub struct Payload<F: ScalarField> {
 impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
     type FirstPhasePayload = Payload<F>;
 
-    // Phase 0
-    // * Assign the secret polynomials from the matrix S to the circuit
-    // * Perform range checks on the coefficients of the secret polynomials
+    /// ## Phase 0
+    /// In this phase, all the polynomials are assigned to the circuit. Namely:
+    /// * polynomial `a_0` and the scalars `q_0` and `k0_0` from the matrix U_0
+    /// * polynomials `s`, `e`, `k`, `r1_0`, `r2_0` from the matrix S_0
+    /// * polynomials `ct0_0`
+    /// The cyclotomic polynomial is not assigned to the circuit, as this is not an input but a constant parameter.
+    /// `a_0`, `q_0`, `k0_0` and `ct0_0` are exposed as public inputs, while the other polynomials are kept private.
+    ///
+    /// Furhtermore:
+    /// * Perform range checks on the coefficients of the secret polynomials
     fn virtual_assign_phase0(
         &self,
         builder: &mut RlcCircuitBuilder<F>,
@@ -85,11 +92,28 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
     ) -> Self::FirstPhasePayload {
         let ctx = builder.base.main(0);
 
+        let mut a_0_assigned = vec![];
         let mut s_assigned = vec![];
         let mut e_assigned = vec![];
         let mut k1_assigned = vec![];
         let mut r2_0_assigned = vec![];
         let mut r1_0_assigned = vec![];
+        let mut ct0_0_assigned = vec![];
+
+        // assign polynomial a_0 to the witness
+        for j in 0..N {
+            let val = F::from_str_vartime(&self.ais[0][j]).unwrap();
+            let coeff_assigned = ctx.load_witness(val);
+            a_0_assigned.push(coeff_assigned);
+        }
+
+        // assign q_0 to the witness
+        let q_0 = F::from_str_vartime(&self.qis[0]).unwrap();
+        let q_0_assigned = ctx.load_witness(q_0);
+
+        // assign k0_0 to the witness
+        let k0_0 = F::from_str_vartime(&self.k0is[0]).unwrap();
+        let k0_0_assigned = ctx.load_witness(k0_0);
 
         // assign polynomial s to the witness
 
@@ -129,6 +153,15 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
             let coeff_assigned = ctx.load_witness(val);
             r1_0_assigned.push(coeff_assigned);
         }
+
+        // assign polynomial ct0is[0] to the witness
+        for j in 0..N {
+            let val = F::from_str_vartime(&self.ct0is[0][j]).unwrap();
+            let coeff_assigned = ctx.load_witness(val);
+            ct0_0_assigned.push(coeff_assigned);
+        }
+
+        // TODO: expose a_0_assigned, q_0_assigned, k0_0_assigned and ct0_0_assigned as public inputs
 
         // perform range check on the coefficients of `s`
 
@@ -184,12 +217,12 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
             s: self.s.clone(),
             e: self.e.clone(),
             k1: self.k1.clone(),
-            k0_0: self.k0is[0].clone(),
-            q_0: self.qis[0].clone(),
             r2_0: self.r2is[0].clone(),
             r1_0: self.r1is[0].clone(),
             a_0: self.ais[0].clone(),
             ct0_0: self.ct0is[0].clone(),
+            q_0_assigned,
+            k0_0_assigned,
             s_assigned,
             e_assigned,
             k1_assigned,
@@ -198,10 +231,12 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
         }
     }
 
-    // Phase 1
-    // * Fetch challenge gamma from phase 0
-    // * Assign public inputs to the circuit: a_0(gamma), cyclo(gamma), k0_0, q_0, ct0_0(gamma)
-    // * Enforce that ct0_0(gamma) = a_0(gamma) * s(gamma) + e(gamma) + k1(gamma) * k0_0 + r1_0(gamma) * q_0 + r2_0(gamma) * cyclo(gamma)
+    /// ## Phase 1
+    /// * Fetch challenge `gamma` from phase 0
+    /// * Assign public inputs to the circuit: `a_0(gamma)`, `cyclo(gamma)`, `ct0_0(gamma)`. Since the polynomials are public from phase 0, the evaluation at gamma doesn't need to be constrained inside the circuit,
+    /// but can safely be performed (and verified) outside the circuit
+    /// * Enforce the evaluation of the RLC for the polynomials `s`, `e`, `k1`, `r2_0`, `r1_0` at `gamma`
+    /// * Enforce that `ct0_0(gamma) = a_0(gamma) * s(gamma) + e(gamma) + k1(gamma) * k0_0 + r1_0(gamma) * q_0 + r2_0(gamma) * cyclo(gamma)`
     fn virtual_assign_phase1(
         builder: &mut RlcCircuitBuilder<F>,
         range: &RangeChip<F>,
@@ -212,12 +247,12 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
             s,
             e,
             k1,
-            k0_0,
-            q_0,
             r2_0,
             r1_0,
             a_0,
             ct0_0,
+            q_0_assigned,
+            k0_0_assigned,
             s_assigned,
             e_assigned,
             k1_assigned,
@@ -249,16 +284,6 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
         let cyclo_eval_at_gamma_assigned = ctx_gate.load_witness(cyclo_eval_at_gamma);
 
         // TODO: expose cyclo_eval_at_gamma_assigned as a public input
-
-        // Assign k0_0 to the circuit
-        let k0_0_assigned = ctx_gate.load_witness(F::from_str_vartime(&k0_0).unwrap());
-
-        // TODO: expose k0_0_assigned as a public input
-
-        // Assign q_0 to the circuit
-        let q_0_assigned = ctx_gate.load_witness(F::from_str_vartime(&q_0).unwrap());
-
-        // TODO: expose q_0_assigned as a public input
 
         let ct0_0_poly = ct0_0
             .iter()
@@ -444,7 +469,7 @@ mod test {
                 VerifyFailure::Lookup {
                     name: "lookup".to_string(),
                     lookup_index: 0,
-                    location: FailureLocation::OutsideRegion { row: 6146 }
+                    location: FailureLocation::OutsideRegion { row: 8196 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::Fixed, 1).into(),
@@ -455,7 +480,7 @@ mod test {
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 37 }
+                    location: FailureLocation::OutsideRegion { row: 35 }
                 }
             ])
         );
@@ -500,7 +525,7 @@ mod test {
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 37 }
+                    location: FailureLocation::OutsideRegion { row: 35 }
                 }
             ])
         );

@@ -65,8 +65,8 @@ def main(args):
     # `ct0is` are the polynomials ct0i for each CRT basis. The coefficients normalized to be in the range [0, p), where p is the modulus of the prime field of the circuit
     ct0is = []
 
-    # `ais_normalized` are the polynomials ai for each CRT basis. The coefficients normalized to be in the range [0, p), where p is the modulus of the prime field of the circuit
-    ais_normalized = []
+    # `ais` are the polynomials ai for each CRT basis. The coefficients normalized to be in the range [0, p), where p is the modulus of the prime field of the circuit
+    ais= []
 
     p = 21888242871839275222246405745257275088548364400416034343698204186575808495617
 
@@ -142,15 +142,25 @@ def main(args):
         assert lhs == rhs
 
         '''
-        CIRCUIT - PHASE 1 - ASSIGNMENT PHASE
+        CIRCUIT - PHASE 0 - ASSIGNMENT PHASE
 
-        In this phase, the polynomials belonging to the matrix S are assigned to the circuit.
+        In this phase, all the polynomials are assigned to the circuit. Namely:
+        * polynomial ai and the scalars qi and k0i from the matrix Ui
+        * polynomials s, e, k, r1i, r2i from the matrix Si
+        * polynomials ct0i
+
+        The cyclotomic polynomial is not assigned to the circuit, as this is not an input but a constant parameter.
+
+        ai, qi, k0i and ct0i are exposed as public inputs, while the other polynomials are kept private.
         '''
 
         # ... Perform assignment here and expose public inputs...
 
-
         # Every assigned value must be an element of the field Zp. Negative values `-z` are assigned as `p - z`
+        ai_assigned = assign_to_circuit(ai, p)
+        k0i_assigned = assign_to_circuit(k0i, p).coefficients[0]
+        qi_assigned = assign_to_circuit(Polynomial([qis[i]]), p).coefficients[0]
+        ct0i_assigned = assign_to_circuit(ct0i, p)
         s_assigned = assign_to_circuit(s, p)
         e_assigned = assign_to_circuit(e, p)
         k1_assigned = assign_to_circuit(k1, p)
@@ -158,9 +168,9 @@ def main(args):
         r2i_assigned = assign_to_circuit(r2i, p)
 
         '''
-        CIRCUIT - PHASE 1 - RANGE CHECK OF PRIVATE POLYNOMIALS 
+        CIRCUIT - PHASE 0 - RANGE CHECK OF PRIVATE POLYNOMIALS 
 
-        In this phase, the coefficients of the private polynomials are checked to be in the correct range.
+        In this phase, the coefficients of the private polynomials from matrix Si are checked to be in the correct range.
         '''
 
         # ... Perform range check here ...
@@ -256,36 +266,38 @@ def main(args):
         assert all(coeff >= 0 and coeff <= 2*r1i_bound for coeff in r1i_normalized.coefficients)
 
         '''
-        CIRCUIT - END OF PHASE 1 - WITNESS COMMITMENT 
+        CIRCUIT - END OF PHASE 0 - WITNESS COMMITMENT 
 
-        At the end of phase 1, the witness is committed and a challenge is generated using the Fiat-Shamir heuristic.
+        At the end of phase 0, the witness is committed and a challenge is generated using the Fiat-Shamir heuristic.
         '''
 
         # For the sake of simplicity, we generate a random challenge here
         alpha = randint(0, 1000)
 
         '''
-        CIRCUIT - PHASE 2 - ASSIGNMENT PHASE
+        CIRCUIT - PHASE 1 - ASSIGNMENT PHASE
+
+        Challenge alpha is fetched from phase 0 and used to evaluate the public polynomials at alpha.
+        These polynomials are evaluate at alpha outside the circuit and the evaluation is assigned to the circuit and exposed as public inputs.
+        Since the polynomials are public from phase 0, the evaluation at alpha doesn't need to be constrained inside the circuit,
+        but can safely be performed (and verified) outside the circuit
+
         The public inputs are assigned to the circuit. These are:
-        * a_0(alpha)
-        * cyclo(alpha)
-        * k0_0
-        * q0
-        * ct0_0(alpha)
+        * ai_alpha
+        * cyclo_alpha
+        * ct0i_alpha
         '''
 
         # The evaluation of ai_alpha, cyclo_alpha, ct0i_alpha is performed outside the circuit
-        ai_normalized = Polynomial([coeff % p for coeff in ais[i].coefficients])
-        ct0i_normalized = Polynomial([coeff % p for coeff in ciphertext[0].coefficients])
 
-        ai_alpha = ai_normalized.evaluate(alpha) 
+        ai_alpha = ai_assigned.evaluate(alpha) 
         cyclo_alpha = cyclo.evaluate(alpha)
-        ct0i_alpha = ct0i_normalized.evaluate(alpha)
+        ct0i_alpha = ct0i_assigned.evaluate(alpha)
 
         # ... Perform assignment here and expose expose public inputs ...
 
         '''
-        CIRCUIT - PHASE 2 - CORRECT ENCRYPTION CONSTRAINT
+        CIRCUIT - PHASE 1 - CORRECT ENCRYPTION CONSTRAINT
 
         We need to prove that ct0i = ct0i_hat + r1i * qi + r2i * cyclo mod Zp.
         We do that by proving that LHS(alpha) = RHS(alpha) for a random alpha according to Scwhartz-Zippel lemma.
@@ -296,18 +308,22 @@ def main(args):
         k1_alpha = k1_assigned.evaluate(alpha)
         r1i_alpha = r1i_assigned.evaluate(alpha)
         r2i_alpha = r2i_assigned.evaluate(alpha)
-        k0i_normalized = k0i.coefficients[0] % p
 
         lhs = ct0i_alpha 
-        rhs = (ai_alpha * s_alpha + e_alpha + (k1_alpha * k0i_normalized) + (r1i_alpha * qis[i]) + (r2i_alpha * cyclo_alpha))
+        rhs = (ai_alpha * s_alpha + e_alpha + (k1_alpha * k0i_assigned) + (r1i_alpha * qi_assigned) + (r2i_alpha * cyclo_alpha))
 
         assert lhs % p == rhs % p
 
+        # The verifier shoud fetch alpha and check that ai_alpha, cyclo_alpha, ct0i_alpha were generated correctly
+        ai_alpha == ai_assigned.evaluate(alpha)
+        cyclo_alpha == cyclo.evaluate(alpha)
+        ct0i_alpha == ct0i_assigned.evaluate(alpha)
+
         r1is.append(r1i_assigned)
         r2is.append(r2i_assigned)
-        ais_normalized.append(ai_normalized)
-        ct0is.append(ct0i_normalized)
-        k0is.append(k0i_normalized)
+        ais.append(ai_assigned)
+        ct0is.append(ct0i_assigned)
+        k0is.append(k0i_assigned)
 
     # Parse the inputs into a JSON format such this can be used as input for the (real) circuit
     json_input = {
@@ -318,7 +334,7 @@ def main(args):
         "k0is": [str(k0i) for k0i in k0is],
         "r2is": [[str(coef) for coef in r2i.coefficients] for r2i in r2is],
         "r1is": [[str(coef) for coef in r1i.coefficients] for r1i in r1is],
-        "ais": [[str(coef) for coef in ai.coefficients] for ai in ais_normalized],
+        "ais": [[str(coef) for coef in ai.coefficients] for ai in ais],
         "ct0is": [[str(coef) for coef in ct0i.coefficients] for ct0i in ct0is],
     }
 
