@@ -7,7 +7,7 @@ Circuit for proving the correct encryption under BFV fully homomorphic encryptio
 To generate the parameters for the secret key proof of encryption run the following command:
 
 ```bash
-python3 python_poc/circuit_sk.py -n 1024 -qis '[                                                   
+python3 scripts/circuit_sk.py -n 1024 -qis '[                                                   
     1152921504606584833,
     1152921504598720513,
     1152921504597016577,
@@ -48,3 +48,8 @@ These constants are then to be added to `src/constants/sk_enc.rs` file. Note tha
 cargo build
 cargo test --release -- --nocapture
 ```
+
+The halo2 circuit is based on a fork of `axiom-eth` that implements two minor changes:
+
+- `RlcCircuit` and `RlcExecutor` are included into a utils mod such that they can be consumed outside of the crate 
+- The `RlcCircuitInstructions` are modified to enable equality constraints on instance column in Second Phase
