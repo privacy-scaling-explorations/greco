@@ -163,6 +163,10 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
     /// The coefficients of the private polynomials from each i-th matrix `Si` are checked to be in the correct range.
     /// * polynomials `s`, `e`, `k1` are range checked only once as common to each `Si` matrix
     /// * polynomials `r1i`, `r2i` are range checked for each `Si` matrix
+    /// 
+    /// Negative coefficients `-z` are assigned as `p - z` to the circuit. For example `-1` is assigned as `p - 1`.
+    /// Performing the range check on such large coefficients is not efficient are requires large lookup tables.
+    /// To avoid this, we shift the coefficients (both negative and positive) by a constant to make them positive and then perform the range check.
     ///
     /// ### CORRECT ENCRYPTION CONSTRAINT
     /// We need to prove that `ct0i = ct0i_hat + r1i * qi + r2i * cyclo` mod p for each i-th CRT basis.
@@ -247,26 +251,24 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
 
         // TODO: expose ais_at_gamma_assigned, ct0is_at_gamma_assigned, cyclo_at_gamma_assigned, qis_assigned, k0is_assigned as public inputs
 
-        // RANGE CHECK OF PRIVATE POLYNOMIALS
-
         // perform range check on the coefficients of `s`
 
         let s_bound_constant = Constant(F::from(1));
         let s_bound = 3;
 
         for j in 0..N {
-            let normalized_coeff = range.gate().add(ctx_gate, s_assigned[j], s_bound_constant);
+            let shifted_coeff = range.gate().add(ctx_gate, s_assigned[j], s_bound_constant);
             // TODO: we can make this a bit more efficient by not having to reassign the constant every time
-            range.check_less_than_safe(ctx_gate, normalized_coeff, s_bound);
+            range.check_less_than_safe(ctx_gate, shifted_coeff, s_bound);
         }
 
         // perform range check on the coefficients of `e`
         let e_bound_constant = Constant(F::from(E_BOUND));
 
         for j in 0..N {
-            let normalized_coeff = range.gate().add(ctx_gate, e_assigned[j], e_bound_constant);
+            let shifted_coeff = range.gate().add(ctx_gate, e_assigned[j], e_bound_constant);
             // TODO: we can make this a bit more efficient by not having to reassign the constant every time
-            range.check_less_than_safe(ctx_gate, normalized_coeff, 2 * E_BOUND);
+            range.check_less_than_safe(ctx_gate, shifted_coeff, 2 * E_BOUND);
         }
 
         // perform range check on the coefficients of `k1`
@@ -274,23 +276,23 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
         let k1_bound_constant = Constant(F::from(K1_BOUND));
 
         for j in 0..N {
-            let normalized_coeff = range
+            let shifted_coeff = range
                 .gate()
                 .add(ctx_gate, k1_assigned[j], k1_bound_constant);
             // TODO: we can make this a bit more efficient by not having to reassign the constant every time
-            range.check_less_than_safe(ctx_gate, normalized_coeff, 2 * K1_BOUND);
+            range.check_less_than_safe(ctx_gate, shifted_coeff, 2 * K1_BOUND);
         }
 
         // perform range check on the coefficients of `r2is`
         for z in 0..r2is_assigned.len() {
             let r2i_bound_constant = Constant(F::from(R2_BOUNDS[z]));
             for j in 0..(N - 1) {
-                let normalized_coeff =
+                let shifted_coeff =
                     range
                         .gate()
                         .add(ctx_gate, r2is_assigned[z][j], r2i_bound_constant);
                 // TODO: we can make this a bit more efficient by not having to reassign the constant every time
-                range.check_less_than_safe(ctx_gate, normalized_coeff, 2 * R2_BOUNDS[z]);
+                range.check_less_than_safe(ctx_gate, shifted_coeff, 2 * R2_BOUNDS[z]);
             }
         }
 
@@ -298,12 +300,12 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
         for z in 0..r1is_assigned.len() {
             let r1i_bound_constant = Constant(F::from(R1_BOUNDS[z]));
             for j in 0..(2 * N - 1) {
-                let normalized_coeff =
+                let shifted_coeff =
                     range
                         .gate()
                         .add(ctx_gate, r1is_assigned[z][j], r1i_bound_constant);
                 // TODO: we can make this a bit more efficient by not having to reassign the constant every time
-                range.check_less_than_safe(ctx_gate, normalized_coeff, 2 * R1_BOUNDS[z]);
+                range.check_less_than_safe(ctx_gate, shifted_coeff, 2 * R1_BOUNDS[z]);
             }
         }
 
