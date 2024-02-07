@@ -5,13 +5,11 @@ use axiom_eth::rlc::{
 use halo2_base::{
     gates::{circuit::BaseCircuitParams, GateInstructions, RangeChip, RangeInstructions},
     utils::ScalarField,
-    AssignedValue,
-    QuantumCell::Constant,
 };
 use serde::Deserialize;
 
-use crate::constants::sk_enc::{E_BOUND, K1_BOUND, N, R1_BOUNDS, R2_BOUNDS};
-use crate::utils::evaluate_poly;
+use crate::constants::sk_enc::{E_BOUND, K1_BOUND, N, R1_BOUNDS, R2_BOUNDS, S_BOUND};
+use crate::poly::{Poly, PolyAssigned};
 const TEST_K: usize = 22;
 
 /// Helper function to define the parameters of the RlcCircuit
@@ -57,13 +55,13 @@ pub struct BfvSkEncryptionCircuit {
 
 /// Payload returned by the first phase of the circuit to be reused in the second phase
 pub struct Payload<F: ScalarField> {
-    s_assigned: Vec<AssignedValue<F>>,
-    e_assigned: Vec<AssignedValue<F>>,
+    s_assigned: PolyAssigned<F>,
+    e_assigned: PolyAssigned<F>,
     qis: Vec<String>,
-    k1_assigned: Vec<AssignedValue<F>>,
+    k1_assigned: PolyAssigned<F>,
     k0is: Vec<String>,
-    r2is_assigned: Vec<Vec<AssignedValue<F>>>,
-    r1is_assigned: Vec<Vec<AssignedValue<F>>>,
+    r2is_assigned: Vec<PolyAssigned<F>>,
+    r1is_assigned: Vec<PolyAssigned<F>>,
     ais: Vec<Vec<String>>,
     ct0is: Vec<Vec<String>>,
 }
@@ -84,53 +82,26 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
     ) -> Self::FirstPhasePayload {
         let ctx = builder.base.main(0);
 
-        let mut s_assigned = vec![];
-        let mut e_assigned = vec![];
-        let mut k1_assigned = vec![];
+        let s = Poly::<F>::new(self.s.clone());
+        let s_assigned = PolyAssigned::new(ctx, s);
+
+        let e = Poly::<F>::new(self.e.clone());
+        let e_assigned = PolyAssigned::new(ctx, e);
+
+        let k1 = Poly::<F>::new(self.k1.clone());
+        let k1_assigned = PolyAssigned::new(ctx, k1);
+
         let mut r2is_assigned = vec![];
         let mut r1is_assigned = vec![];
 
-        // assign polynomial s to the witness
-        for j in 0..N {
-            let val = F::from_str_vartime(&self.s[j]).unwrap();
-            let coeff_assigned = ctx.load_witness(val);
-            s_assigned.push(coeff_assigned);
-        }
+        for z in 0..self.ct0is.len() {
+            let r2i = Poly::<F>::new(self.r2is[z].clone());
+            let r2i_assigned = PolyAssigned::new(ctx, r2i);
+            r2is_assigned.push(r2i_assigned);
 
-        // assign polynomial e to the witness
-        for j in 0..N {
-            let val = F::from_str_vartime(&self.e[j]).unwrap();
-            let coeff_assigned = ctx.load_witness(val);
-            e_assigned.push(coeff_assigned);
-        }
-
-        // assign polynomial k1 to the witness
-        for j in 0..N {
-            let val = F::from_str_vartime(&self.k1[j]).unwrap();
-            let coeff_assigned = ctx.load_witness(val);
-            k1_assigned.push(coeff_assigned);
-        }
-
-        // assign polynomials r2is to the witness. The degree of r2i is N - 2
-        for z in 0..self.r2is.len() {
-            let mut vec = vec![];
-            for j in 0..(N - 1) {
-                let val = F::from_str_vartime(&self.r2is[z][j]).unwrap();
-                let coeff_assigned = ctx.load_witness(val);
-                vec.push(coeff_assigned);
-            }
-            r2is_assigned.push(vec);
-        }
-
-        // assign polynomials r1is to the witness. The degree of r1i is 2N - 2
-        for z in 0..self.r1is.len() {
-            let mut vec = vec![];
-            for j in 0..(2 * N - 1) {
-                let val = F::from_str_vartime(&self.r1is[z][j]).unwrap();
-                let coeff_assigned = ctx.load_witness(val);
-                vec.push(coeff_assigned);
-            }
-            r1is_assigned.push(vec);
+            let r1i = Poly::<F>::new(self.r1is[z].clone());
+            let r1i_assigned = PolyAssigned::new(ctx, r1i);
+            r1is_assigned.push(r1i_assigned);
         }
 
         Payload {
@@ -163,7 +134,7 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
     /// The coefficients of the private polynomials from each i-th matrix `Si` are checked to be in the correct range.
     /// * polynomials `s`, `e`, `k1` are range checked only once as common to each `Si` matrix
     /// * polynomials `r1i`, `r2i` are range checked for each `Si` matrix
-    /// 
+    ///
     /// Negative coefficients `-z` are assigned as `p - z` to the circuit. For example `-1` is assigned as `p - 1`.
     /// Performing the range check on such large coefficients is not efficient are requires large lookup tables.
     /// To avoid this, we shift the coefficients (both negative and positive) by a constant to make them positive and then perform the range check.
@@ -194,131 +165,62 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
             ct0is,
         } = payload;
 
-        // ASSIGNMENT PHASE
+        // ASSIGNMENT
 
         let (ctx_gate, ctx_rlc) = builder.rlc_ctx_pair();
         let gamma = *rlc.gamma();
 
         let mut ais_at_gamma_assigned = vec![];
         let mut ct0is_at_gamma_assigned = vec![];
-
-        // TODO: Do everything in a single loop
-        for ai in &ais {
-            let ai_poly = ai
-                .iter()
-                .map(|coeff| F::from_str_vartime(coeff).unwrap())
-                .collect::<Vec<_>>();
-
-            let ai_at_gamma = evaluate_poly(&ai_poly, gamma);
-            let ai_at_gamma_assigned = ctx_gate.load_witness(ai_at_gamma);
-            ais_at_gamma_assigned.push(ai_at_gamma_assigned);
-        }
-
-        for ct0i in &ct0is {
-            let ct0i_poly = ct0i
-                .iter()
-                .map(|coeff| F::from_str_vartime(coeff).unwrap())
-                .collect::<Vec<_>>();
-
-            let ct0i_at_gamma = evaluate_poly(&ct0i_poly, gamma);
-            let ct0i_at_gamma_assigned = ctx_gate.load_witness(ct0i_at_gamma);
-            ct0is_at_gamma_assigned.push(ct0i_at_gamma_assigned);
-        }
-
-        // cyclo poly is equal to x^N + 1
-        let mut cyclo_poly = vec![F::from(0); N + 1];
-        cyclo_poly[0] = F::from(1);
-        cyclo_poly[N] = F::from(1);
-
-        // Assign cyclo(gamma) to the circuit
-        let cyclo_at_gamma = evaluate_poly(&cyclo_poly, gamma);
-        let cyclo_at_gamma_assigned = ctx_gate.load_witness(cyclo_at_gamma);
-
         let mut qis_assigned = vec![];
         let mut k0is_assigned = vec![];
 
-        for qi in &qis {
-            let qi_val = F::from_str_vartime(qi).unwrap();
+        for z in 0..ct0is.len() {
+            let ai = Poly::<F>::new(ais[z].clone());
+            let ai_at_gamma = ai.eval(gamma);
+            let ai_at_gamma_assigned = ctx_gate.load_witness(ai_at_gamma);
+            ais_at_gamma_assigned.push(ai_at_gamma_assigned);
+
+            let ct0i = Poly::<F>::new(ct0is[z].clone());
+            let ct0i_at_gamma = ct0i.eval(gamma);
+            let ct0i_at_gamma_assigned = ctx_gate.load_witness(ct0i_at_gamma);
+            ct0is_at_gamma_assigned.push(ct0i_at_gamma_assigned);
+
+            let qi_val = F::from_str_vartime(&qis[z]).unwrap();
             let qi_assigned = ctx_gate.load_witness(qi_val);
             qis_assigned.push(qi_assigned);
-        }
 
-        for k0i in &k0is {
-            let k0i_val = F::from_str_vartime(k0i).unwrap();
+            let k0i_val = F::from_str_vartime(&k0is[z]).unwrap();
             let k0i_assigned = ctx_gate.load_witness(k0i_val);
             k0is_assigned.push(k0i_assigned);
         }
 
+        // cyclo poly is equal to x^N + 1
+        let mut cyclo_coeffs = vec![String::from("0"); N + 1];
+        cyclo_coeffs[0] = String::from("1");
+        cyclo_coeffs[N] = String::from("1");
+
+        let cyclo = Poly::<F>::new(cyclo_coeffs);
+        let cyclo_at_gamma = cyclo.eval(gamma);
+        let cyclo_at_gamma_assigned = ctx_gate.load_witness(cyclo_at_gamma);
+
         // TODO: expose ais_at_gamma_assigned, ct0is_at_gamma_assigned, cyclo_at_gamma_assigned, qis_assigned, k0is_assigned as public inputs
 
-        // perform range check on the coefficients of `s`
+        // RANGE CHECK OF PRIVATE POLYNOMIALS
+        s_assigned.range_check(ctx_gate, range, S_BOUND);
+        e_assigned.range_check(ctx_gate, range, E_BOUND);
+        k1_assigned.range_check(ctx_gate, range, K1_BOUND);
 
-        let s_bound_constant = Constant(F::from(1));
-        let s_bound = 3;
-
-        for j in 0..N {
-            let shifted_coeff = range.gate().add(ctx_gate, s_assigned[j], s_bound_constant);
-            // TODO: we can make this a bit more efficient by not having to reassign the constant every time
-            range.check_less_than_safe(ctx_gate, shifted_coeff, s_bound);
-        }
-
-        // perform range check on the coefficients of `e`
-        let e_bound_constant = Constant(F::from(E_BOUND));
-
-        for j in 0..N {
-            let shifted_coeff = range.gate().add(ctx_gate, e_assigned[j], e_bound_constant);
-            // TODO: we can make this a bit more efficient by not having to reassign the constant every time
-            range.check_less_than_safe(ctx_gate, shifted_coeff, 2 * E_BOUND);
-        }
-
-        // perform range check on the coefficients of `k1`
-
-        let k1_bound_constant = Constant(F::from(K1_BOUND));
-
-        for j in 0..N {
-            let shifted_coeff = range
-                .gate()
-                .add(ctx_gate, k1_assigned[j], k1_bound_constant);
-            // TODO: we can make this a bit more efficient by not having to reassign the constant every time
-            range.check_less_than_safe(ctx_gate, shifted_coeff, 2 * K1_BOUND);
-        }
-
-        // perform range check on the coefficients of `r2is`
-        for z in 0..r2is_assigned.len() {
-            let r2i_bound_constant = Constant(F::from(R2_BOUNDS[z]));
-            for j in 0..(N - 1) {
-                let shifted_coeff =
-                    range
-                        .gate()
-                        .add(ctx_gate, r2is_assigned[z][j], r2i_bound_constant);
-                // TODO: we can make this a bit more efficient by not having to reassign the constant every time
-                range.check_less_than_safe(ctx_gate, shifted_coeff, 2 * R2_BOUNDS[z]);
-            }
-        }
-
-        // perform range check on the coefficients of `r1is`
-        for z in 0..r1is_assigned.len() {
-            let r1i_bound_constant = Constant(F::from(R1_BOUNDS[z]));
-            for j in 0..(2 * N - 1) {
-                let shifted_coeff =
-                    range
-                        .gate()
-                        .add(ctx_gate, r1is_assigned[z][j], r1i_bound_constant);
-                // TODO: we can make this a bit more efficient by not having to reassign the constant every time
-                range.check_less_than_safe(ctx_gate, shifted_coeff, 2 * R1_BOUNDS[z]);
-            }
+        for z in 0..ct0is.len() {
+            r2is_assigned[z].range_check(ctx_gate, range, R2_BOUNDS[z]);
+            r1is_assigned[z].range_check(ctx_gate, range, R1_BOUNDS[z]);
         }
 
         // CORRECT ENCRYPTION CONSTRAINT
 
-        // Constrain the evaluation of the polynomials `s`, `e`, `k1` at gamma
-        let rlc_trace_s = rlc.compute_rlc_fixed_len(ctx_rlc, s_assigned);
-        let rlc_trace_e = rlc.compute_rlc_fixed_len(ctx_rlc, e_assigned);
-        let rlc_trace_k1 = rlc.compute_rlc_fixed_len(ctx_rlc, k1_assigned);
-
-        let s_at_gamma = rlc_trace_s.rlc_val;
-        let e_at_gamma = rlc_trace_e.rlc_val;
-        let k1_at_gamma = rlc_trace_k1.rlc_val;
+        let s_at_gamma = s_assigned.enforce_eval_at_gamma(ctx_rlc, rlc);
+        let e_at_gamma = e_assigned.enforce_eval_at_gamma(ctx_rlc, rlc);
+        let k1_at_gamma = k1_assigned.enforce_eval_at_gamma(ctx_rlc, rlc);
 
         let gate = range.gate();
 
@@ -326,36 +228,25 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
         // LHS = ct0i(gamma)
         // RHS = ai(gamma) * s(gamma) + e(gamma) + k1(gamma) * k0i + r1i(gamma) * qi + r2i(gamma) * cyclo(gamma)
         for z in 0..ct0is.len() {
-            let rlc_trace_r1_i = rlc.compute_rlc_fixed_len(ctx_rlc, r1is_assigned[z].clone());
-            let rlc_trace_r2_i = rlc.compute_rlc_fixed_len(ctx_rlc, r2is_assigned[z].clone());
+            let r1i_at_gamma = r1is_assigned[z].enforce_eval_at_gamma(ctx_rlc, rlc);
+            let r2i_at_gamma = r2is_assigned[z].enforce_eval_at_gamma(ctx_rlc, rlc);
 
-            let r1i_at_gamma = rlc_trace_r1_i.rlc_val;
-            let r2i_at_gamma = rlc_trace_r2_i.rlc_val;
+            // rhs = ai(gamma) * s(gamma) + e(gamma)
+            let rhs = gate.mul_add(ctx_gate, ais_at_gamma_assigned[z], s_at_gamma, e_at_gamma);
 
-            // rhs_0 = ai(gamma) * s(gamma)
-            let rhs_0 = gate.mul(ctx_gate, ais_at_gamma_assigned[z], s_at_gamma);
+            // rhs = rhs + k1(gamma) * k0i
+            let rhs = gate.mul_add(ctx_gate, k1_at_gamma, k0is_assigned[z], rhs);
 
-            // rhs_1 = e(gamma)
-            let rhs_1 = e_at_gamma;
+            // rhs = rhs + r1i(gamma) * qi
+            let rhs = gate.mul_add(ctx_gate, r1i_at_gamma, qis_assigned[z], rhs);
 
-            // rhs_2 = k1(gamma) * k0i
-            let rhs_2 = gate.mul(ctx_gate, k1_at_gamma, k0is_assigned[z]);
-
-            // rhs_3 = r1i(gamma) * qi
-            let rhs_3 = gate.mul(ctx_gate, r1i_at_gamma, qis_assigned[z]);
-
-            // rhs_4 = r2i(gamma) * cyclo(gamma)
-            let rhs_4 = gate.mul(ctx_gate, r2i_at_gamma, cyclo_at_gamma_assigned);
-
-            let rhs_01 = gate.add(ctx_gate, rhs_0, rhs_1);
-            let rhs_23 = gate.add(ctx_gate, rhs_2, rhs_3);
-            let rhs_0123 = gate.add(ctx_gate, rhs_01, rhs_23);
-            let rhs = gate.add(ctx_gate, rhs_0123, rhs_4);
+            // rhs = rhs + r2i(gamma) * cyclo(gamma)
+            let rhs = gate.mul_add(ctx_gate, r2i_at_gamma, cyclo_at_gamma_assigned, rhs);
             let lhs = ct0is_at_gamma_assigned[z];
 
-            let res = gate.sub(ctx_gate, lhs, rhs);
-            // TODO: we can make this a bit more efficient by not having to reassign the constant every time
-            gate.assert_is_const(ctx_gate, &res, &F::from(0));
+            // LHS(gamma) = RHS(gamma)
+            let res = gate.is_equal(ctx_gate, lhs, rhs);
+            gate.assert_is_const(ctx_gate, &res, &F::from(1));
         }
     }
 }
@@ -442,19 +333,19 @@ mod test {
             Err(vec![
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 892172 }
+                    location: FailureLocation::OutsideRegion { row: 104462 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 892182 }
+                    location: FailureLocation::OutsideRegion { row: 104472 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475591 }
+                    location: FailureLocation::OutsideRegion { row: 1475585 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475595 }
+                    location: FailureLocation::OutsideRegion { row: 1475605 }
                 },
             ])
         );
@@ -500,124 +391,124 @@ mod test {
                     column: (Any::Fixed, 1).into(),
                     location: FailureLocation::InRegion {
                         region: (2, "base+rlc phase 1").into(),
-                        offset: 0
+                        offset: 1
                     }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475591 }
+                    location: FailureLocation::OutsideRegion { row: 1475585 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475595 }
+                    location: FailureLocation::OutsideRegion { row: 1475605 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475627 }
+                    location: FailureLocation::OutsideRegion { row: 1475613 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475631 }
+                    location: FailureLocation::OutsideRegion { row: 1475633 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475663 }
+                    location: FailureLocation::OutsideRegion { row: 1475641 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475667 }
+                    location: FailureLocation::OutsideRegion { row: 1475661 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475699 }
+                    location: FailureLocation::OutsideRegion { row: 1475669 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475703 }
+                    location: FailureLocation::OutsideRegion { row: 1475689 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475735 }
+                    location: FailureLocation::OutsideRegion { row: 1475697 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475739 }
+                    location: FailureLocation::OutsideRegion { row: 1475717 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475771 }
+                    location: FailureLocation::OutsideRegion { row: 1475725 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475775 }
+                    location: FailureLocation::OutsideRegion { row: 1475745 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475807 }
+                    location: FailureLocation::OutsideRegion { row: 1475753 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475811 }
+                    location: FailureLocation::OutsideRegion { row: 1475773 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475843 }
+                    location: FailureLocation::OutsideRegion { row: 1475781 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475847 }
+                    location: FailureLocation::OutsideRegion { row: 1475801 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475879 }
+                    location: FailureLocation::OutsideRegion { row: 1475809 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475883 }
+                    location: FailureLocation::OutsideRegion { row: 1475829 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475915 }
+                    location: FailureLocation::OutsideRegion { row: 1475837 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475919 }
+                    location: FailureLocation::OutsideRegion { row: 1475857 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475951 }
+                    location: FailureLocation::OutsideRegion { row: 1475865 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475955 }
+                    location: FailureLocation::OutsideRegion { row: 1475885 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475987 }
+                    location: FailureLocation::OutsideRegion { row: 1475893 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475991 }
+                    location: FailureLocation::OutsideRegion { row: 1475913 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1476023 }
+                    location: FailureLocation::OutsideRegion { row: 1475921 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1476027 }
+                    location: FailureLocation::OutsideRegion { row: 1475941 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1476059 }
+                    location: FailureLocation::OutsideRegion { row: 1475949 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1476063 }
+                    location: FailureLocation::OutsideRegion { row: 1475969 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1476095 }
+                    location: FailureLocation::OutsideRegion { row: 1475977 }
                 },
             ])
         );

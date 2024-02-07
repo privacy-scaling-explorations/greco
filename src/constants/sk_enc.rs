@@ -2,6 +2,8 @@
 pub const N: usize = 1024;
 /// The coefficients of the polynomial `e` should exist in the interval `[-E_BOUND, E_BOUND]` where `E_BOUND` is the upper bound of the gaussian distribution with 𝜎 = 3.2
 pub const E_BOUND: u64 = 19;
+/// The coefficients of the plynomial `s` should exist in the interval `[-S_BOUND, S_BOUND]`.
+pub const S_BOUND: u64 = 1;
 /// The coefficients of the polynomials `r1is` should exist in the interval `[-R1_BOUND[i], R1_BOUND[i]]` where `R1_BOUND[i]` is equal to `(qi-1)/2`
 pub const R1_BOUNDS: [u64; 15] = [
     1321, 12139, 1692, 1530, 19009, 17587, 3417, 15539, 24450, 19013, 24041, 5934, 31437, 16662,
