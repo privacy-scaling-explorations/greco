@@ -36,10 +36,10 @@ def main(args):
 
     m = bfv_crt.bfv_q.rlwe.Rt.sample_polynomial()
 
-    ciphertexts = bfv_crt.SecretKeyEncrypt(s, ais, e, m)
+    ctis = bfv_crt.SecretKeyEncrypt(s, ais, e, m)
 
     # Sanity check for valid decryption    
-    message_prime = bfv_crt.Decrypt(s, ciphertexts)
+    message_prime = bfv_crt.Decrypt(s, ctis)
 
     assert m == message_prime
 
@@ -71,12 +71,13 @@ def main(args):
     For each CRT basis, we need to compute the polynomials r1i and r2i (check this doc for more details: https://hackmd.io/@gaussian/r1W98Kqqa)
     '''
 
-    for i, ciphertext in enumerate(ciphertexts):
+    cyclo = [1] + [0] * (n - 1) + [1]
+    cyclo = Polynomial(cyclo)
 
-        ct0i = ciphertext[0]
-        ai = Polynomial([-1]) * ciphertext[1]
-        cyclo = [1] + [0] * (n - 1) + [1]
-        cyclo = Polynomial(cyclo)
+    for i, cti in enumerate(ctis):
+
+        ct0i = cti[0]
+        ai = Polynomial([-1]) * cti[1]
 
         # k0i = -t^{-1} namely the multiplicative inverse of t modulo qi
         k0i = mod_inverse(t, crt_moduli.qis[i]) * (-1)
@@ -148,7 +149,7 @@ def main(args):
     r2_bounds = []
 
     '''
-    CIRCUIT - PHASE 0 - ASSIGNMENT PHASE
+    CIRCUIT - PHASE 0 - ASSIGNMENT
 
     In this phase, the polynomials for each matrix `Si` are assigned to the circuit. Namely:
     * polynomials `s`, `e`, `k1` are assigned only once as common to each `Si` matrix
@@ -163,7 +164,7 @@ def main(args):
     r1is_assigned = []
     r2is_assigned = []
 
-    for i in range(len(ciphertexts)):
+    for i in range(len(ctis)):
         r1i_assigned = assign_to_circuit(r1is[i], p)
         r2i_assigned = assign_to_circuit(r2is[i], p)
         r1is_assigned.append(r1i_assigned)
@@ -173,51 +174,52 @@ def main(args):
     '''
     CIRCUIT - END OF PHASE 0 - WITNESS COMMITMENT 
 
-    At the end of phase 0, the witness is committed and hashed and a challenge is extracted from the hash (Fiat-Shamir heuristic).
+    At the end of phase 0, the witness is committed and hashed and a challenge is extracted (Fiat-Shamir heuristic).
     '''
 
     # For the sake of simplicity, we generate a random challenge here
-    alpha = randint(0, 1000)
+    gamma = randint(0, 1000)
 
     '''
-    CIRCUIT - PHASE 1 - ASSIGNMENT PHASE
+    CIRCUIT - PHASE 1 - ASSIGNMENT
 
-    Challenge alpha is fetched from phase 0 and used to evaluate the public polynomials at alpha. 
-    These public polynomials are `ai`, `cyclo` and `ct0i`.
-    The evaluation of these polynomials at alpha is performed outside the circuit and the evaluation is assigned to the circuit and exposed as public inputs.
-    Further public inputs assigned to the circuit are the scalars `qi` and `k0i`.
-
-    * Assign to the polynomial `ai(alpha)`, `cyclo(alpha)`, `ct0i(alpha)` and the scalars `qi` and `k0i` to the circuit.
-    * Expose them as public inputs.
+    * Fetch challenge `gamma` from phase 0
+    * Assign evaluations to the circuit: `ai(gamma)`, `ct0_i(gamma)` for each i-th CRT basis.
+    * Assign `cyclo(gamma)` to the circuit
+    * Assign scalars `q_i` and `k0_i` to the circuit for each i-th CRT basis
+    * Expose `ai(gamma)`, `ct0_i(gamma)`, `q_i`, `k0_i` as public inputs for each i-th CRT basis
+    * Expose `cyclo(gamma)` as public input
+    Since the polynomials are public from phase 0, the evaluation at gamma doesn't need to be constrained inside the circuit,
+    but can safely be performed (and verified) outside the circuit
     '''
 
     # Every assigned value must be an element of the field Zp. Negative coefficients `-z` are assigned as `p - z`
-    ais_at_alpha_assigned = []
-    ct0is_alpha_assigned = []
+    ais_at_gamma_assigned = []
+    ct0is_at_gamma_assigned = []
     qis_assigned = []
     k0is_assigned = []
 
-    for i in range(len(ciphertexts)):
-        ai_alpha = ais[i].evaluate(alpha)
-        ai_alpha_assigned = assign_to_circuit(Polynomial([ai_alpha]), p).coefficients[0]
-        ais_at_alpha_assigned.append(ai_alpha_assigned)
+    for i in range(len(ctis)):
+        ai_at_gamma = ais[i].evaluate(gamma)
+        ai_at_gamma_assigned = assign_to_circuit(Polynomial([ai_at_gamma]), p).coefficients[0]
+        ais_at_gamma_assigned.append(ai_at_gamma_assigned)
 
-        ct0i_alpha = ciphertexts[i][0].evaluate(alpha)
-        ct0i_alpha_assigned = assign_to_circuit(Polynomial([ct0i_alpha]), p).coefficients[0]
-        ct0is_alpha_assigned.append(ct0i_alpha_assigned)
+        ct0i_at_gamma = ctis[i][0].evaluate(gamma)
+        ct0i_at_gamma_assigned = assign_to_circuit(Polynomial([ct0i_at_gamma]), p).coefficients[0]
+        ct0is_at_gamma_assigned.append(ct0i_at_gamma_assigned)
 
         qis_assigned.append(qis[i])
 
         k0i_assigned = assign_to_circuit(k0is[i], p).coefficients[0]
         k0is_assigned.append(k0i_assigned)
 
-    cyclo_alpha = cyclo.evaluate(alpha)
-    cyclo_alpha_assigned = assign_to_circuit(Polynomial([cyclo_alpha]), p).coefficients[0]
+    cyclo_at_gamma = cyclo.evaluate(gamma)
+    cyclo_at_gamma_assigned = assign_to_circuit(Polynomial([cyclo_at_gamma]), p).coefficients[0]
 
     '''
     CIRCUIT - PHASE 1 - RANGE CHECK OF PRIVATE POLYNOMIALS 
 
-    In this phase, the coefficients of the private polynomials from matrix Si are checked to be in the correct range.
+    The coefficients of the private polynomials from each i-th matrix `Si` are checked to be in the correct range.
     * polynomials `s`, `e`, `k1` are range checked only once as common to each `Si` matrix
     * polynomials `r1i`, `r2i` are range checked for each `Si` matrix
     '''
@@ -248,7 +250,7 @@ def main(args):
     k1_shifted = Polynomial([(coeff + int(k1_bound)) % p for coeff in k1_assigned.coefficients])
     assert all(coeff >= 0 and coeff <= 2*k1_bound for coeff in k1_shifted.coefficients)
 
-    for i in range(len(ciphertexts)):
+    for i in range(len(ctis)):
         # sanity check. The coefficients of ct0i should be in the range [-(qi-1)/2, (qi-1)/2]
         bound = int((qis[i] - 1) / 2)
         assert all(coeff >= -bound and coeff <= bound for coeff in ct0is[i].coefficients)
@@ -316,40 +318,55 @@ def main(args):
         '''
         CIRCUIT - PHASE 1 - CORRECT ENCRYPTION CONSTRAINT
 
-        We need to prove that ct0i = ct0i_hat + r1i * qi + r2i * cyclo mod Zp for each i-th CRT basis.
-        We do that by proving that LHS(alpha) = RHS(alpha) for a random alpha according to Scwhartz-Zippel lemma.
-
-        * Constrain the evaluation of the polynomials `s`, `e`, `k1` at alpha. Need to be performed only once as common to each `Si` matrix
-        * Constrain the evaluation of the polynomials `r1i`, `r2i` at alpha for each `Si` matrix
-        * Constrain that LHS(alpha) = RHS(alpha) for each i-th CRT basis
+        We need to prove that `ct0i = ct0i_hat + r1i * qi + r2i * cyclo` mod p for each i-th CRT basis.
+        Where `ct0i_hat = ai * s + e + k1 * k0i`
+        We do that by proving that `LHS(gamma) = RHS(gamma)` according to Scwhartz-Zippel lemma.
+        
+        * Constrain the evaluation of the polynomials `s`, `e`, `k1` at gamma. Need to be performed only once as common to each `Si` matrix
+        * Constrain the evaluation of the polynomials `r1i`, `r2i` at gamma for each `Si` matrix
+        * Constrain that LHS(gamma) = RHS(gamma) for each i-th CRT basis
         '''
 
-        s_alpha_assigned = s_assigned.evaluate(alpha)
-        e_alpha_assigned = e_assigned.evaluate(alpha)
-        k1_alpha_assigned = k1_assigned.evaluate(alpha)
+        s_at_gamma_assigned = s_assigned.evaluate(gamma)
+        e_at_gamma_assigned = e_assigned.evaluate(gamma)
+        k1_at_gamma_assigned = k1_assigned.evaluate(gamma)
 
-        for i in range(len(ciphertexts)):
-            r1i_alpha_assigned = r1is_assigned[i].evaluate(alpha)
-            r2i_alpha_assigned = r2is_assigned[i].evaluate(alpha)
-            lhs = ct0is_alpha_assigned[i]
-            rhs = (ais_at_alpha_assigned[i] * s_alpha_assigned + e_alpha_assigned + (k1_alpha_assigned * k0is_assigned[i]) + (r1i_alpha_assigned * qis_assigned[i]) + (r2i_alpha_assigned * cyclo_alpha_assigned))
+        for i in range(len(ctis)):
+            r1i_gamma_assigned = r1is_assigned[i].evaluate(gamma)
+            r2i_gamma_assigned = r2is_assigned[i].evaluate(gamma)
+            lhs = ct0is_at_gamma_assigned[i]
+            rhs = (ais_at_gamma_assigned[i] * s_at_gamma_assigned + e_at_gamma_assigned + (k1_at_gamma_assigned * k0is_assigned[i]) + (r1i_gamma_assigned * qis_assigned[i]) + (r2i_gamma_assigned * cyclo_at_gamma_assigned))
             
             assert lhs % p == rhs % p
 
         '''
         VERIFICATION PHASE
 
-        The verifier has access to the public polynomials `ai` `ct0i` and `cyclo`.
-        They shoud fetch alpha and check that the public inputs `ai_alpha`, `cyclo_alpha`, `ct0i_alpha` were generated correctly
+        The verifier has access to the public polynomials `ai` `ct0i` and `cyclo` and the scalars `qi` and `k0i`.
+        They shoud fetch gamma and check that the public inputs `ai_gamma`, `cyclo_gamma`, `ct0i_gamma` were generated correctly.
+        Further, they should check that `qi` and `k0i` are matching the public inputs.
         '''
 
-        cyclo_alpha == cyclo.evaluate(alpha)
+        cyclo_at_gamma = cyclo.evaluate(gamma)
+        cyclo_at_gamma_assigned_expected = assign_to_circuit(Polynomial([cyclo_at_gamma]), p).coefficients[0]
+        assert cyclo_at_gamma_assigned == cyclo_at_gamma_assigned_expected
 
-        for i in range(len(ciphertexts)):
-            ai_alpha == ais[i].evaluate(alpha)
-            ct0i_alpha == ciphertexts[i][0].evaluate(alpha)
+        for i in range(len(ctis)):
+            ai_gamma = ais[i].evaluate(gamma)
+            ai_gamma_assigned_expected = assign_to_circuit(Polynomial([ai_gamma]), p).coefficients[0]
+            assert ais_at_gamma_assigned[i] == ai_gamma_assigned_expected
+
+            ct0i_gamma = ctis[i][0].evaluate(gamma)
+            ct0i_gamma_assigned_expected = assign_to_circuit(Polynomial([ct0i_gamma]), p).coefficients[0]
+            assert ct0is_at_gamma_assigned[i] == ct0i_gamma_assigned_expected
+
+            assert qis[i] == qis_assigned[i]
+
+            k0i_assigned_expected = assign_to_circuit(k0is[i], p).coefficients[0]
+            assert k0is_assigned[i] == k0i_assigned_expected
 
     # ais and ct0is need to be parsed such that their coefficients are in the range [0, p - 1]
+    # we don't call them assigned because they are never assigned to the circuit
     ais_in_p = [assign_to_circuit(ai, p) for ai in ais]
     ct0is_in_p = [assign_to_circuit(ct0i, p) for ct0i in ct0is]
     

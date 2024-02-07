@@ -30,17 +30,18 @@ pub fn test_params() -> RlcCircuitParams {
 }
 
 /// `BfvSkEncryptionCircuit` is a circuit that checks the correct formation of a ciphertext resulting from BFV secret key encryption
+/// All the polynomials coefficients and scalars are normalized to be in the range `[0, p)` where p is the modulus of the prime field of the circuit
 ///
 /// # Parameters:
-/// * `s`: secret polynomial, sampled from ternary distribution. The coefficients are normalized to be in the range `[0, p)` where p is the modulus of the prime field of the circuit
-/// * `e`: error polynomial, sampled from discrete Gaussian distribution. The coefficients are normalized to be in the range `[0, p)` where p is the modulus of the prime field of the circuit
-/// * `qis`: list of qis such that qis[i] is the modulus of the i-th CRT basis of the modulus q of the ciphertext space.
-/// * `k1`: scaled message polynomial. The coefficients are normalized to be in the range `[0, p)` where p is the modulus of the prime field of the circuit
-/// * `k0is`: list of the negative of the multiplicative inverses of t mod qis[i]. The values are normalized to be in range [0, p) where p is the modulus of the prime field of the circuit
-/// * `r2is`: list of r2i polynomials for each i-th CRT basis . The coefficients are normalized to be in the range `[0, p)` where p is the modulus of the prime field of the circuit
-/// * `r1is`: list of r1i polynomials for each CRT i-th CRT basis. The coefficients are normalized to be in the range `[0, p)` where p is the modulus of the prime field of the circuit
-/// * `ais`: list of ai polynomials for each CRT i-th CRT basis. The coefficients are normalized to be in the range `[0, p)` where p is the modulus of the prime field of the circuit
-/// * `ct0is`: list of ct0i (first component of the ciphertext cti) polynomials for each CRT i-th CRT basis. The coefficients are normalized to be in the range `[0, p)` where p is the modulus of the prime field of the circuit
+/// * `s`: secret polynomial, sampled from ternary distribution.
+/// * `e`: error polynomial, sampled from discrete Gaussian distribution.
+/// * `qis`: list of scalars qis such that qis[i] is the modulus of the i-th CRT basis of the modulus q of the ciphertext space.
+/// * `k1`: scaled message polynomial.
+/// * `k0is`: list of the scalars equal negative of the multiplicative inverses of t mod qis[i].
+/// * `r2is`: list of r2i polynomials for each i-th CRT basis .
+/// * `r1is`: list of r1i polynomials for each CRT i-th CRT basis.
+/// * `ais`: list of ai polynomials for each CRT i-th CRT basis.
+/// * `ct0is`: list of ct0i (first component of the ciphertext cti) polynomials for each CRT i-th CRT basis.
 #[derive(Deserialize)]
 pub struct BfvSkEncryptionCircuit {
     s: Vec<String>,
@@ -74,6 +75,8 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
     /// In this phase, the polynomials for each matrix `Si` are assigned to the circuit. Namely:
     /// * polynomials `s`, `e`, `k1` are assigned only once as common to each `Si` matrix
     /// * polynomials `r1i`, `r2i` are assigned for each `Si` matrix
+    ///
+    /// At the end of phase 0, the witness is committed and hashed and a challenge is extracted (Fiat-Shamir heuristic).
     fn virtual_assign_phase0(
         &self,
         builder: &mut RlcCircuitBuilder<F>,
@@ -108,7 +111,7 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
             k1_assigned.push(coeff_assigned);
         }
 
-        // assign polynomials r2is to the witness. Note that the degree of r2i is N - 2
+        // assign polynomials r2is to the witness. The degree of r2i is N - 2
         for z in 0..self.r2is.len() {
             let mut vec = vec![];
             for j in 0..(N - 1) {
@@ -119,7 +122,7 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
             r2is_assigned.push(vec);
         }
 
-        // assign polynomials r1is to the witness. Note that the degree of r1i is 2N - 2
+        // assign polynomials r1is to the witness. The degree of r1i is 2N - 2
         for z in 0..self.r1is.len() {
             let mut vec = vec![];
             for j in 0..(2 * N - 1) {
@@ -145,22 +148,30 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
 
     /// ## Phase 1
     ///
-    /// ### ASSIGNMENT PHASE
+    /// ### ASSIGNMENT
     /// * Fetch challenge `gamma` from phase 0
-    /// * Assign public input evaluations to the circuit: `ai(gamma)`, `ct0_i(gamma)` for each i-th CRT basis.
-    /// * Assign public input `cyclo(gamma)` to the circuit
-    /// * Assign public input scalars `q_i` and `k0_i` to the circuit for each i-th CRT basis
+    /// * Assign evaluations to the circuit: `ai(gamma)`, `ct0_i(gamma)` for each i-th CRT basis.
+    /// * Assign `cyclo(gamma)` to the circuit
+    /// * Assign scalars `q_i` and `k0_i` to the circuit for each i-th CRT basis
+    /// * Expose `ai(gamma)`, `ct0_i(gamma)`, `q_i`, `k0_i` as public inputs for each i-th CRT basis
+    /// * Expose `cyclo(gamma)` as public input
+    ///
     /// Since the polynomials are public from phase 0, the evaluation at gamma doesn't need to be constrained inside the circuit,
     /// but can safely be performed (and verified) outside the circuit
+    ///
     /// ### RANGE CHECK OF PRIVATE POLYNOMIALS
     /// The coefficients of the private polynomials from each i-th matrix `Si` are checked to be in the correct range.
     /// * polynomials `s`, `e`, `k1` are range checked only once as common to each `Si` matrix
     /// * polynomials `r1i`, `r2i` are range checked for each `Si` matrix
+    ///
     /// ### CORRECT ENCRYPTION CONSTRAINT
+    /// We need to prove that `ct0i = ct0i_hat + r1i * qi + r2i * cyclo` mod p for each i-th CRT basis.
+    /// Where `ct0i_hat = ai * s + e + k1 * k0i`
+    /// We do that by proving that `LHS(gamma) = RHS(gamma)` according to Scwhartz-Zippel lemma.
+    ///
     /// * Constrain the evaluation of the polynomials `s`, `e`, `k1` at gamma. Need to be performed only once as common to each `Si` matrix
     /// * Constrain the evaluation of the polynomials `r1i`, `r2i` at gamma for each `Si` matrix
-    /// * Constrain that ct0i(gamma) = ct0i_hat(gamma) + r1i(gamma) * qi + r2i(gamma) * cyclo(gamma) for each i-th CRT basis.
-    /// Where ct0i_hat(gamma) is equal to ai(gamma) * s(gamma) + e(gamma) + k1(gamma) * k0i
+    /// * Constrain that LHS(gamma) = RHS(gamma) for each i-th CRT basis
     fn virtual_assign_phase1(
         builder: &mut RlcCircuitBuilder<F>,
         range: &RangeChip<F>,
@@ -178,6 +189,8 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
             ais,
             ct0is,
         } = payload;
+
+        // ASSIGNMENT PHASE
 
         let (ctx_gate, ctx_rlc) = builder.rlc_ctx_pair();
         let gamma = *rlc.gamma();
@@ -234,15 +247,17 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
 
         // TODO: expose ais_at_gamma_assigned, ct0is_at_gamma_assigned, cyclo_at_gamma_assigned, qis_assigned, k0is_assigned as public inputs
 
+        // RANGE CHECK OF PRIVATE POLYNOMIALS
+
         // perform range check on the coefficients of `s`
 
-        let constant_one = Constant(F::from(1));
-        let bound_s = 3;
+        let s_bound_constant = Constant(F::from(1));
+        let s_bound = 3;
 
         for j in 0..N {
-            let normalized_coeff = range.gate().add(ctx_gate, s_assigned[j], constant_one);
+            let normalized_coeff = range.gate().add(ctx_gate, s_assigned[j], s_bound_constant);
             // TODO: we can make this a bit more efficient by not having to reassign the constant every time
-            range.check_less_than_safe(ctx_gate, normalized_coeff, bound_s);
+            range.check_less_than_safe(ctx_gate, normalized_coeff, s_bound);
         }
 
         // perform range check on the coefficients of `e`
@@ -291,6 +306,8 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
                 range.check_less_than_safe(ctx_gate, normalized_coeff, 2 * R1_BOUNDS[z]);
             }
         }
+
+        // CORRECT ENCRYPTION CONSTRAINT
 
         // Constrain the evaluation of the polynomials `s`, `e`, `k1` at gamma
         let rlc_trace_s = rlc.compute_rlc_fixed_len(ctx_rlc, s_assigned);
