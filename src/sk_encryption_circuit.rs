@@ -12,13 +12,13 @@ use serde::Deserialize;
 
 use crate::constants::sk_enc::{E_BOUND, K1_BOUND, N, R1_BOUNDS, R2_BOUNDS};
 use crate::utils::evaluate_poly;
-const K: usize = 22;
+const TEST_K: usize = 22;
 
 /// Helper function to define the parameters of the RlcCircuit
 pub fn test_params() -> RlcCircuitParams {
     RlcCircuitParams {
         base: BaseCircuitParams {
-            k: K,
+            k: TEST_K,
             num_advice_per_phase: vec![1, 1],
             num_fixed: 1,
             num_lookup_advice_per_phase: vec![0, 1],
@@ -363,8 +363,8 @@ mod test {
 
     use std::{fs::File, io::Read};
 
-    use super::{test_params, K};
-    use crate::sk_encryption_circuit::BfvSkEncryptionCircuit;
+    use super::test_params;
+    use crate::{constants::sk_enc::R1_BOUNDS, sk_encryption_circuit::BfvSkEncryptionCircuit};
     use axiom_eth::rlc::{circuit::builder::RlcCircuitBuilder, utils::executor::RlcExecutor};
     use halo2_base::{
         gates::circuit::CircuitBuilderStage,
@@ -385,111 +385,239 @@ mod test {
         let circuit = serde_json::from_str::<BfvSkEncryptionCircuit>(&data).unwrap();
 
         // 2. Build the circuit for MockProver
-        let params = test_params();
+        let circuit_params = test_params();
         let mut mock_builder: RlcCircuitBuilder<Fr> =
-            RlcCircuitBuilder::from_stage(CircuitBuilderStage::Mock, 0).use_params(params);
+            RlcCircuitBuilder::from_stage(CircuitBuilderStage::Mock, 0)
+                .use_params(circuit_params.clone());
         mock_builder.base.set_lookup_bits(8); // Set the lookup bits to 8
 
         let rlc_circuit = RlcExecutor::new(mock_builder, circuit);
 
         // 3. Run the mock prover. The circuit should be satisfied
-        MockProver::run(K as u32, &rlc_circuit, vec![])
-            .unwrap()
-            .assert_satisfied();
+        MockProver::run(
+            circuit_params.base.k.try_into().unwrap(),
+            &rlc_circuit,
+            vec![],
+        )
+        .unwrap()
+        .assert_satisfied();
     }
 
-    //     #[test]
-    //     pub fn test_sk_enc_invalid_range() {
-    //         // 1. Define the inputs of the circuit
-    //         let file_path = "src/data/sk_enc_input.json";
-    //         let mut file = File::open(file_path).unwrap();
-    //         let mut data = String::new();
-    //         file.read_to_string(&mut data).unwrap();
-    //         let mut circuit = serde_json::from_str::<BfvSkEncryptionCircuit>(&data).unwrap();
+    #[test]
+    pub fn test_sk_enc_invalid_range() {
+        // 1. Define the inputs of the circuit
+        let file_path = "src/data/sk_enc_input.json";
+        let mut file = File::open(file_path).unwrap();
+        let mut data = String::new();
+        file.read_to_string(&mut data).unwrap();
+        let mut circuit = serde_json::from_str::<BfvSkEncryptionCircuit>(&data).unwrap();
 
-    //         // 2. Invalidate the circuit by setting the value of a coefficient of the polynomial `s` to be out of range
-    //         let out_of_range_s = "2";
+        // 2. Invalidate the circuit by setting the value of a coefficient of the polynomial `r1is[0]` to be out of range
+        let out_of_range_coeff = R1_BOUNDS[0] + 1;
+        circuit.r1is[0][0] = out_of_range_coeff.to_string();
 
-    //         circuit.s[0] = out_of_range_s.to_string();
+        // 3. Build the circuit for MockProver
+        let circuit_params = test_params();
+        let mut mock_builder: RlcCircuitBuilder<Fr> =
+            RlcCircuitBuilder::from_stage(CircuitBuilderStage::Mock, 0)
+                .use_params(circuit_params.clone());
+        mock_builder.base.set_lookup_bits(8); // Set the lookup bits to 8
 
-    //         // 3. Build the circuit for MockProver
-    //         let params = test_params();
-    //         let mut mock_builder: RlcCircuitBuilder<Fr> =
-    //             RlcCircuitBuilder::from_stage(CircuitBuilderStage::Mock, 0).use_params(params);
-    //         mock_builder.base.set_lookup_bits(8); // Set the lookup bits to 8
+        let rlc_circuit = RlcExecutor::new(mock_builder, circuit);
 
-    //         let rlc_circuit = RlcExecutor::new(mock_builder, circuit);
+        // 4. Run the mock prover
+        let invalid_prover = MockProver::run(
+            circuit_params.base.k.try_into().unwrap(),
+            &rlc_circuit,
+            vec![],
+        )
+        .unwrap();
 
-    //         // 4. Run the mock prover
-    //         let invalid_prover = MockProver::run(K as u32, &rlc_circuit, vec![]).unwrap();
+        // 5. Assert that the circuit is not satisfied
+        // In particular, it should fail the range check enforced in the second phase for the first coefficient of r1is[0] and the equality check in the second phase for the 0-th basis
+        assert_eq!(
+            invalid_prover.verify(),
+            Err(vec![
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 892172 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 892182 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475591 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475595 }
+                },
+            ])
+        );
+    }
 
-    //         // 5. Assert that the circuit is not satisfied
-    //         // In particular, it should fail the range check enforced in the first phase and the equality check in the second phase
-    //         assert_eq!(
-    //             invalid_prover.verify(),
-    //             Err(vec![
-    //                 VerifyFailure::Lookup {
-    //                     name: "lookup".to_string(),
-    //                     lookup_index: 0,
-    //                     location: FailureLocation::OutsideRegion { row: 8196 }
-    //                 },
-    //                 VerifyFailure::Permutation {
-    //                     column: (Any::Fixed, 1).into(),
-    //                     location: FailureLocation::InRegion {
-    //                         region: (2, "base+rlc phase 1").into(),
-    //                         offset: 0
-    //                     }
-    //                 },
-    //                 VerifyFailure::Permutation {
-    //                     column: (Any::advice_in(SecondPhase), 1).into(),
-    //                     location: FailureLocation::OutsideRegion { row: 35 }
-    //                 }
-    //             ])
-    //         );
-    //     }
+    #[test]
+    pub fn test_sk_enc_invalid_polys() {
+        // 1. Define the inputs of the circuit
+        let file_path = "src/data/sk_enc_input.json";
+        let mut file = File::open(file_path).unwrap();
+        let mut data = String::new();
+        file.read_to_string(&mut data).unwrap();
+        let mut circuit = serde_json::from_str::<BfvSkEncryptionCircuit>(&data).unwrap();
 
-    //     #[test]
-    //     pub fn test_sk_enc_invalid_polys() {
-    //         // 1. Define the inputs of the circuit
-    //         let file_path = "src/data/sk_enc_input.json";
-    //         let mut file = File::open(file_path).unwrap();
-    //         let mut data = String::new();
-    //         file.read_to_string(&mut data).unwrap();
-    //         let mut circuit = serde_json::from_str::<BfvSkEncryptionCircuit>(&data).unwrap();
+        // 2. Invalidate the circuit by setting a different `s` polynomial
+        let invalid_s = vec!["1".to_string(); 1024];
 
-    //         // 2. Invalidate the circuit by setting a different `s` polynomial
-    //         let invalid_s = vec!["1".to_string(); 1024];
+        circuit.s = invalid_s;
 
-    //         circuit.s = invalid_s;
+        // 3. Build the circuit for MockProver
+        let circuit_params = test_params();
+        let mut mock_builder: RlcCircuitBuilder<Fr> =
+            RlcCircuitBuilder::from_stage(CircuitBuilderStage::Mock, 0)
+                .use_params(circuit_params.clone());
+        mock_builder.base.set_lookup_bits(8); // Set the lookup bits to 8
 
-    //         // 3. Build the circuit for MockProver
-    //         let params = test_params();
-    //         let mut mock_builder: RlcCircuitBuilder<Fr> =
-    //             RlcCircuitBuilder::from_stage(CircuitBuilderStage::Mock, 0).use_params(params);
-    //         mock_builder.base.set_lookup_bits(8); // Set the lookup bits to 8
+        let rlc_circuit = RlcExecutor::new(mock_builder, circuit);
 
-    //         let rlc_circuit = RlcExecutor::new(mock_builder, circuit);
+        // 4. Run the mock prover
+        let invalid_prover = MockProver::run(
+            circuit_params.base.k.try_into().unwrap(),
+            &rlc_circuit,
+            vec![],
+        )
+        .unwrap();
 
-    //         // 4. Run the mock prover
-    //         let invalid_prover = MockProver::run(K as u32, &rlc_circuit, vec![]).unwrap();
-
-    //         // 5. Assert that the circuit is not satisfied
-    //         // In particular, it should only fail the equality check in the second phase
-    //         assert_eq!(
-    //             invalid_prover.verify(),
-    //             Err(vec![
-    //                 VerifyFailure::Permutation {
-    //                     column: (Any::Fixed, 1).into(),
-    //                     location: FailureLocation::InRegion {
-    //                         region: (2, "base+rlc phase 1").into(),
-    //                         offset: 0
-    //                     }
-    //                 },
-    //                 VerifyFailure::Permutation {
-    //                     column: (Any::advice_in(SecondPhase), 1).into(),
-    //                     location: FailureLocation::OutsideRegion { row: 35 }
-    //                 }
-    //             ])
-    //         );
-    //     }
+        // 5. Assert that the circuit is not satisfied
+        // In particular, it should fail the equality check (LHS=RHS) in the second phase for each i-th CRT basis
+        assert_eq!(
+            invalid_prover.verify(),
+            Err(vec![
+                VerifyFailure::Permutation {
+                    column: (Any::Fixed, 1).into(),
+                    location: FailureLocation::InRegion {
+                        region: (2, "base+rlc phase 1").into(),
+                        offset: 0
+                    }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475591 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475595 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475627 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475631 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475663 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475667 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475699 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475703 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475735 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475739 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475771 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475775 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475807 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475811 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475843 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475847 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475879 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475883 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475915 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475919 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475951 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475955 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475987 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1475991 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1476023 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1476027 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1476059 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1476063 }
+                },
+                VerifyFailure::Permutation {
+                    column: (Any::advice_in(SecondPhase), 1).into(),
+                    location: FailureLocation::OutsideRegion { row: 1476095 }
+                },
+            ])
+        );
+    }
 }
