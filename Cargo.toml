@@ -1,5 +1,5 @@
 [package]
-name = "halo2-fhe"
+name = "greco"
 version = "0.1.0"
 edition = "2021"
 
