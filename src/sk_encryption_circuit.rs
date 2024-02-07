@@ -69,12 +69,14 @@ pub struct Payload<F: ScalarField> {
 impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
     type FirstPhasePayload = Payload<F>;
 
-    /// ## Phase 0
-    /// In this phase, the polynomials for each matrix `Si` are assigned to the circuit. Namely:
-    /// * polynomials `s`, `e`, `k1` are assigned only once as common to each `Si` matrix
-    /// * polynomials `r1i`, `r2i` are assigned for each `Si` matrix
-    ///
-    /// At the end of phase 0, the witness is committed and hashed and a challenge is extracted (Fiat-Shamir heuristic).
+    /// #### Phase 0
+    /// In this phase, the polynomials for each matrix $S_i$ are assigned to the circuit. Namely:
+    /// * polynomials `s`, `e`, `k1` are assigned to the witness table. This has to be done only once as these polynomial are common to each $S_i$ matrix
+    /// * polynomials `r1i`, `r2i` are assigned to the witness table for each $S_i$ matrix.
+
+    /// Witness values are element of the finite field $\mod{p}$. Negative coefficients $-z$ are assigned as field elements $p - z$.
+
+    /// At the end of phase 0, the witness generated so far is interpolated into a polynomial and committed by the prover. The hash of this commitment is used as challenge and will be used as a source of randomness $\gamma$ in Phase 1. This feature is made available by Halo2 [Challenge API](https://hackmd.io/@axiom/SJw3p-qX3).
     fn virtual_assign_phase0(
         &self,
         builder: &mut RlcCircuitBuilder<F>,
@@ -117,36 +119,38 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
         }
     }
 
-    /// ## Phase 1
-    ///
-    /// ### ASSIGNMENT
-    /// * Fetch challenge `gamma` from phase 0
-    /// * Assign evaluations to the circuit: `ai(gamma)`, `ct0_i(gamma)` for each i-th CRT basis.
+    /// #### Phase 1
+
+    /// In this phase, the following two core constraints are enforced:
+
+    /// - The coefficients of $S_i$ are in the expected range.  
+    /// - $U_i(\gamma) \times S_i(\gamma) =Ct_{0,i}(\gamma)$
+
+    /// ##### Assignment
+    /// * Assign evaluations to the circuit: `ai(gamma)`, `ct0_i(gamma)` for each $i$-th CRT basis.
     /// * Assign `cyclo(gamma)` to the circuit
-    /// * Assign scalars `q_i` and `k0_i` to the circuit for each i-th CRT basis
-    /// * Expose `ai(gamma)`, `ct0_i(gamma)`, `q_i`, `k0_i` as public inputs for each i-th CRT basis
+    /// * Assign scalars `q_i` and `k0_i` to the circuit for each $i$-th CRT basis
+    /// * Expose `ai(gamma)`, `ct0_i(gamma)`, `q_i`, `k0_i` as public inputs for each $i$-th CRT basis
     /// * Expose `cyclo(gamma)` as public input
-    ///
-    /// Since the polynomials are public from phase 0, the evaluation at gamma doesn't need to be constrained inside the circuit,
-    /// but can safely be performed (and verified) outside the circuit
-    ///
-    /// ### RANGE CHECK OF PRIVATE POLYNOMIALS
-    /// The coefficients of the private polynomials from each i-th matrix `Si` are checked to be in the correct range.
-    /// * polynomials `s`, `e`, `k1` are range checked only once as common to each `Si` matrix
-    /// * polynomials `r1i`, `r2i` are range checked for each `Si` matrix
-    ///
-    /// Negative coefficients `-z` are assigned as `p - z` to the circuit. For example `-1` is assigned as `p - 1`.
-    /// Performing the range check on such large coefficients is not efficient are requires large lookup tables.
-    /// To avoid this, we shift the coefficients (both negative and positive) by a constant to make them positive and then perform the range check.
-    ///
-    /// ### CORRECT ENCRYPTION CONSTRAINT
-    /// We need to prove that `ct0i = ct0i_hat + r1i * qi + r2i * cyclo` mod p for each i-th CRT basis.
-    /// Where `ct0i_hat = ai * s + e + k1 * k0i`
-    /// We do that by proving that `LHS(gamma) = RHS(gamma)` according to Scwhartz-Zippel lemma.
-    ///
-    /// * Constrain the evaluation of the polynomials `s`, `e`, `k1` at gamma. Need to be performed only once as common to each `Si` matrix
-    /// * Constrain the evaluation of the polynomials `r1i`, `r2i` at gamma for each `Si` matrix
-    /// * Constrain that LHS(gamma) = RHS(gamma) for each i-th CRT basis
+
+    /// Since these polynomials and scalars are known to the verifier, the evaluation at $\gamma$ doesn't need to be constrained inside the circuit. Instead, this can be safely be performed (and verified) outside the circuit.
+
+    /// ##### Range Check
+
+    /// The coefficients of the private polynomials from each $i$-th matrix $S_i$ are checked to be in the correct range.
+    /// * Range check polynomials `s`, `e`, `k1`. This has to be done only once as these polynomial are common to each $S_i$ matrix.
+    /// * Range check polynomials `r1i`, `r2i` for each `Si` matrix
+
+    /// Since negative coefficients `-z` are assigned as `p - z` to the circuit, this might result in very large coefficients. Performing the range check on such large coefficients requires large lookup tables. To avoid this, the coefficients (both negative and positive) are shifted by a constant to make them positive and then perform the range check.
+
+    /// ##### Correct Encryption Constraint
+
+    /// It is needed to prove that $U_i(\gamma) \times S_i(\gamma) =Ct_{0,i}(\gamma)$. This can be rewritten as `ct0i = ct0i_hat + r1i * qi + r2i * cyclo` for each $i$-th CRT basis. Where `ct0i_hat = ai * s + e + k1 * k0i`.
+
+    /// This constrained is enforced by proving that `LHS(gamma) = RHS(gamma)`. According to the Schwartz-Zippel lemma, if this relation between polynomial when evaluated at a random point holds true, then then the polynomials are identical with high probability.
+    /// * Constrain the evaluation of the polynomials `s`, `e`, `k1` at $\gamma$. This has to be done only once as these polynomial are common to each $S_i$ matrix.
+    /// * Constrain the evaluation of the polynomials `r1i`, `r2i` at $\gamma$ for each `Si` matrix
+    /// * Constrain that `LHS(gamma) = RHS(gamma)` for each i-th CRT basis
     fn virtual_assign_phase1(
         builder: &mut RlcCircuitBuilder<F>,
         range: &RangeChip<F>,
@@ -196,17 +200,12 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
         }
 
         // cyclo poly is equal to x^N + 1
-        let mut cyclo_coeffs = vec![String::from("0"); N + 1];
-        cyclo_coeffs[0] = String::from("1");
-        cyclo_coeffs[N] = String::from("1");
-
-        let cyclo = Poly::<F>::new(cyclo_coeffs);
-        let cyclo_at_gamma = cyclo.eval(gamma);
+        let cyclo_at_gamma = gamma.pow_vartime([N as u64]) + F::from(1);
         let cyclo_at_gamma_assigned = ctx_gate.load_witness(cyclo_at_gamma);
 
         // TODO: expose ais_at_gamma_assigned, ct0is_at_gamma_assigned, cyclo_at_gamma_assigned, qis_assigned, k0is_assigned as public inputs
 
-        // RANGE CHECK OF PRIVATE POLYNOMIALS
+        // RANGE CHECK
         s_assigned.range_check(ctx_gate, range, S_BOUND);
         e_assigned.range_check(ctx_gate, range, E_BOUND);
         k1_assigned.range_check(ctx_gate, range, K1_BOUND);

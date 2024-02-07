@@ -12,9 +12,7 @@ import json
 def main(args): 
     
     '''
-    ENCRYPTION PHASE - performed outside the circuit
-
-    In this phase, the encryption operation is performed. Later, the circuit will be used to prove that the encryption was performed correctly.
+    ENCRYPTION PHASE - performed outside the circuit.
     '''
 
     n = args.n
@@ -67,7 +65,6 @@ def main(args):
 
     '''
     SETUP PHASE - performed outside the circuit
-
     For each CRT basis, we need to compute the polynomials r1i and r2i (check this doc for more details: https://hackmd.io/@gaussian/r1W98Kqqa)
     '''
 
@@ -149,11 +146,7 @@ def main(args):
     r2_bounds = []
 
     '''
-    CIRCUIT - PHASE 0 - ASSIGNMENT
-
-    In this phase, the polynomials for each matrix `Si` are assigned to the circuit. Namely:
-    * polynomials `s`, `e`, `k1` are assigned only once as common to each `Si` matrix
-    * polynomials `r1i`, `r2i` are assigned for each `Si` matrix
+    CIRCUIT - PHASE 0
     '''
 
     # Every assigned value must be an element of the field Zp. Negative coefficients `-z` are assigned as `p - z`
@@ -171,26 +164,11 @@ def main(args):
         r2is_assigned.append(r2i_assigned)
 
 
-    '''
-    CIRCUIT - END OF PHASE 0 - WITNESS COMMITMENT 
-
-    At the end of phase 0, the witness is committed and hashed and a challenge is extracted (Fiat-Shamir heuristic).
-    '''
-
     # For the sake of simplicity, we generate a random challenge here
     gamma = randint(0, 1000)
 
     '''
-    CIRCUIT - PHASE 1 - ASSIGNMENT
-
-    * Fetch challenge `gamma` from phase 0
-    * Assign evaluations to the circuit: `ai(gamma)`, `ct0_i(gamma)` for each i-th CRT basis.
-    * Assign `cyclo(gamma)` to the circuit
-    * Assign scalars `q_i` and `k0_i` to the circuit for each i-th CRT basis
-    * Expose `ai(gamma)`, `ct0_i(gamma)`, `q_i`, `k0_i` as public inputs for each i-th CRT basis
-    * Expose `cyclo(gamma)` as public input
-    Since the polynomials are public from phase 0, the evaluation at gamma doesn't need to be constrained inside the circuit,
-    but can safely be performed (and verified) outside the circuit
+    CIRCUIT - PHASE 1
     '''
 
     # Every assigned value must be an element of the field Zp. Negative coefficients `-z` are assigned as `p - z`
@@ -215,14 +193,6 @@ def main(args):
 
     cyclo_at_gamma = cyclo.evaluate(gamma)
     cyclo_at_gamma_assigned = assign_to_circuit(Polynomial([cyclo_at_gamma]), p).coefficients[0]
-
-    '''
-    CIRCUIT - PHASE 1 - RANGE CHECK OF PRIVATE POLYNOMIALS 
-
-    The coefficients of the private polynomials from each i-th matrix `Si` are checked to be in the correct range.
-    * polynomials `s`, `e`, `k1` are range checked only once as common to each `Si` matrix
-    * polynomials `r1i`, `r2i` are range checked for each `Si` matrix
-    '''
 
     # constraint. The coefficients of s should be in the range [-1, 0, 1]
     assert all(coeff in [-1, 0, 1] for coeff in s.coefficients)
@@ -315,18 +285,6 @@ def main(args):
         r1i_shifted = Polynomial([(coeff + int(r1i_bound)) % p for coeff in r1is_assigned[0].coefficients])
         assert all(coeff >= 0 and coeff <= 2*r1i_bound for coeff in r1i_shifted.coefficients)
 
-        '''
-        CIRCUIT - PHASE 1 - CORRECT ENCRYPTION CONSTRAINT
-
-        We need to prove that `ct0i = ct0i_hat + r1i * qi + r2i * cyclo` mod p for each i-th CRT basis.
-        Where `ct0i_hat = ai * s + e + k1 * k0i`
-        We do that by proving that `LHS(gamma) = RHS(gamma)` according to Scwhartz-Zippel lemma.
-        
-        * Constrain the evaluation of the polynomials `s`, `e`, `k1` at gamma. Need to be performed only once as common to each `Si` matrix
-        * Constrain the evaluation of the polynomials `r1i`, `r2i` at gamma for each `Si` matrix
-        * Constrain that LHS(gamma) = RHS(gamma) for each i-th CRT basis
-        '''
-
         s_at_gamma_assigned = s_assigned.evaluate(gamma)
         e_at_gamma_assigned = e_assigned.evaluate(gamma)
         k1_at_gamma_assigned = k1_assigned.evaluate(gamma)
@@ -341,10 +299,6 @@ def main(args):
 
         '''
         VERIFICATION PHASE
-
-        The verifier has access to the public polynomials `ai` `ct0i` and `cyclo` and the scalars `qi` and `k0i`.
-        They shoud fetch gamma and check that the public inputs `ai_gamma`, `cyclo_gamma`, `ct0i_gamma` were generated correctly.
-        Further, they should check that `qi` and `k0i` are matching the public inputs.
         '''
 
         cyclo_at_gamma = cyclo.evaluate(gamma)
