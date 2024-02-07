@@ -328,9 +328,7 @@ def main(args):
     json_input = {
         "s": [str(coef) for coef in s_assigned.coefficients],
         "e": [str(coef) for coef in e_assigned.coefficients],
-        "qis": [str(qi) for qi in qis_assigned],
         "k1": [str(coef) for coef in k1_assigned.coefficients],
-        "k0is": [str(k0i) for k0i in k0is_assigned],
         "r2is": [[str(coef) for coef in r2i.coefficients] for r2i in r2is_assigned],
         "r1is": [[str(coef) for coef in r1i.coefficients] for r1i in r1is_assigned],
         "ais": [[str(coef) for coef in ai_in_p.coefficients] for ai_in_p in ais_in_p],
@@ -353,6 +351,12 @@ def main(args):
     print(f"pub const R2_BOUNDS: [u64; {len(r2_bounds)}] = [{', '.join(map(str, r2_bounds))}];")
     print(f"/// The coefficients of `k1` should exist in the interval `[-K1_BOUND, K1_BOUND]` where `K1_BOUND` is equal to `(t-1)/2`")
     print(f"pub const K1_BOUND: u64 = {k1_bound};")
+    qis_str = ', '.join(f'"{q}"' for q in qis_assigned)
+    print(f"/// List of scalars `qis` such that `qis[i]` is the modulus of the i-th CRT basis of `q` (ciphertext space modulus)")
+    print(f"pub const QIS: [&str; {len(qis_assigned)}] = [{qis_str}];")
+    k0is_str = ', '.join(f'"{k0i}"' for k0i in k0is_assigned)
+    print(f"/// List of scalars `k0is` such that `k0i[i]` is equal to the negative of the multiplicative inverses of t mod qi.")
+    print(f"pub const K0IS: [&str; {len(k0is_assigned)}] = [{k0is_str}];")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

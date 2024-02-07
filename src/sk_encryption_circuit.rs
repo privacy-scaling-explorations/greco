@@ -5,10 +5,11 @@ use axiom_eth::rlc::{
 use halo2_base::{
     gates::{circuit::BaseCircuitParams, GateInstructions, RangeChip, RangeInstructions},
     utils::ScalarField,
+    QuantumCell::Constant,
 };
 use serde::Deserialize;
 
-use crate::constants::sk_enc::{E_BOUND, K1_BOUND, N, R1_BOUNDS, R2_BOUNDS, S_BOUND};
+use crate::constants::sk_enc::{E_BOUND, K0IS, K1_BOUND, N, QIS, R1_BOUNDS, R2_BOUNDS, S_BOUND};
 use crate::poly::{Poly, PolyAssigned};
 const TEST_K: usize = 22;
 
@@ -33,9 +34,7 @@ pub fn test_params() -> RlcCircuitParams {
 /// # Parameters:
 /// * `s`: secret polynomial, sampled from ternary distribution.
 /// * `e`: error polynomial, sampled from discrete Gaussian distribution.
-/// * `qis`: list of scalars qis such that qis[i] is the modulus of the i-th CRT basis of the modulus q of the ciphertext space.
 /// * `k1`: scaled message polynomial.
-/// * `k0is`: list of the scalars equal negative of the multiplicative inverses of t mod qis[i].
 /// * `r2is`: list of r2i polynomials for each i-th CRT basis .
 /// * `r1is`: list of r1i polynomials for each CRT i-th CRT basis.
 /// * `ais`: list of ai polynomials for each CRT i-th CRT basis.
@@ -44,9 +43,7 @@ pub fn test_params() -> RlcCircuitParams {
 pub struct BfvSkEncryptionCircuit {
     s: Vec<String>,
     e: Vec<String>,
-    qis: Vec<String>,
     k1: Vec<String>,
-    k0is: Vec<String>,
     r2is: Vec<Vec<String>>,
     r1is: Vec<Vec<String>>,
     ais: Vec<Vec<String>>,
@@ -57,9 +54,7 @@ pub struct BfvSkEncryptionCircuit {
 pub struct Payload<F: ScalarField> {
     s_assigned: PolyAssigned<F>,
     e_assigned: PolyAssigned<F>,
-    qis: Vec<String>,
     k1_assigned: PolyAssigned<F>,
-    k0is: Vec<String>,
     r2is_assigned: Vec<PolyAssigned<F>>,
     r1is_assigned: Vec<PolyAssigned<F>>,
     ais: Vec<Vec<String>>,
@@ -109,9 +104,7 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
         Payload {
             s_assigned,
             e_assigned,
-            qis: self.qis.clone(),
             k1_assigned,
-            k0is: self.k0is.clone(),
             r2is_assigned,
             r1is_assigned,
             ais: self.ais.clone(),
@@ -129,11 +122,10 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
     /// ##### Assignment
     /// * Assign evaluations to the circuit: `ai(gamma)`, `ct0_i(gamma)` for each $i$-th CRT basis.
     /// * Assign `cyclo(gamma)` to the circuit
-    /// * Assign scalars `q_i` and `k0_i` to the circuit for each $i$-th CRT basis
-    /// * Expose `ai(gamma)`, `ct0_i(gamma)`, `q_i`, `k0_i` as public inputs for each $i$-th CRT basis
+    /// * Expose `ai(gamma)`, `ct0_i(gamma)` as public inputs for each $i$-th CRT basis
     /// * Expose `cyclo(gamma)` as public input
 
-    /// Since these polynomials and scalars are known to the verifier, the evaluation at $\gamma$ doesn't need to be constrained inside the circuit. Instead, this can be safely be performed (and verified) outside the circuit.
+    /// Since these polynomials known to the verifier, the evaluation at $\gamma$ doesn't need to be constrained inside the circuit. Instead, this can be safely be performed (and verified) outside the circuit.
 
     /// ##### Range Check
 
@@ -150,6 +142,7 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
     /// This constrained is enforced by proving that `LHS(gamma) = RHS(gamma)`. According to the Schwartz-Zippel lemma, if this relation between polynomial when evaluated at a random point holds true, then then the polynomials are identical with high probability.
     /// * Constrain the evaluation of the polynomials `s`, `e`, `k1` at $\gamma$. This has to be done only once as these polynomial are common to each $S_i$ matrix.
     /// * Constrain the evaluation of the polynomials `r1i`, `r2i` at $\gamma$ for each `Si` matrix
+    /// * qi and k0i are constants to the circuit encoded during key generation. 
     /// * Constrain that `LHS(gamma) = RHS(gamma)` for each i-th CRT basis
     fn virtual_assign_phase1(
         builder: &mut RlcCircuitBuilder<F>,
@@ -160,9 +153,7 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
         let Payload {
             s_assigned,
             e_assigned,
-            qis,
             k1_assigned,
-            k0is,
             r2is_assigned,
             r1is_assigned,
             ais,
@@ -176,8 +167,8 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
 
         let mut ais_at_gamma_assigned = vec![];
         let mut ct0is_at_gamma_assigned = vec![];
-        let mut qis_assigned = vec![];
-        let mut k0is_assigned = vec![];
+        let mut qi_constants = vec![];
+        let mut k0i_constants = vec![];
 
         for z in 0..ct0is.len() {
             let ai = Poly::<F>::new(ais[z].clone());
@@ -190,20 +181,18 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
             let ct0i_at_gamma_assigned = ctx_gate.load_witness(ct0i_at_gamma);
             ct0is_at_gamma_assigned.push(ct0i_at_gamma_assigned);
 
-            let qi_val = F::from_str_vartime(&qis[z]).unwrap();
-            let qi_assigned = ctx_gate.load_witness(qi_val);
-            qis_assigned.push(qi_assigned);
+            let qi_constant = Constant(F::from_str_vartime(QIS[z]).unwrap());
+            qi_constants.push(qi_constant);
 
-            let k0i_val = F::from_str_vartime(&k0is[z]).unwrap();
-            let k0i_assigned = ctx_gate.load_witness(k0i_val);
-            k0is_assigned.push(k0i_assigned);
+            let k0i_constant = Constant(F::from_str_vartime(K0IS[z]).unwrap());
+            k0i_constants.push(k0i_constant);
         }
 
         // cyclo poly is equal to x^N + 1
         let cyclo_at_gamma = gamma.pow_vartime([N as u64]) + F::from(1);
         let cyclo_at_gamma_assigned = ctx_gate.load_witness(cyclo_at_gamma);
 
-        // TODO: expose ais_at_gamma_assigned, ct0is_at_gamma_assigned, cyclo_at_gamma_assigned, qis_assigned, k0is_assigned as public inputs
+        // TODO: expose ais_at_gamma_assigned, ct0is_at_gamma_assigned, cyclo_at_gamma_assigned as public inputs
 
         // RANGE CHECK
         s_assigned.range_check(ctx_gate, range, S_BOUND);
@@ -234,10 +223,10 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
             let rhs = gate.mul_add(ctx_gate, ais_at_gamma_assigned[z], s_at_gamma, e_at_gamma);
 
             // rhs = rhs + k1(gamma) * k0i
-            let rhs = gate.mul_add(ctx_gate, k1_at_gamma, k0is_assigned[z], rhs);
+            let rhs = gate.mul_add(ctx_gate, k1_at_gamma, k0i_constants[z], rhs);
 
             // rhs = rhs + r1i(gamma) * qi
-            let rhs = gate.mul_add(ctx_gate, r1i_at_gamma, qis_assigned[z], rhs);
+            let rhs = gate.mul_add(ctx_gate, r1i_at_gamma, qi_constants[z], rhs);
 
             // rhs = rhs + r2i(gamma) * cyclo(gamma)
             let rhs = gate.mul_add(ctx_gate, r2i_at_gamma, cyclo_at_gamma_assigned, rhs);
@@ -332,19 +321,19 @@ mod test {
             Err(vec![
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 104462 }
+                    location: FailureLocation::OutsideRegion { row: 104432 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 104472 }
+                    location: FailureLocation::OutsideRegion { row: 104442 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475585 }
+                    location: FailureLocation::OutsideRegion { row: 1475555 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475605 }
+                    location: FailureLocation::OutsideRegion { row: 1475575 }
                 },
             ])
         );
@@ -395,119 +384,119 @@ mod test {
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475585 }
+                    location: FailureLocation::OutsideRegion { row: 1475555 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475605 }
+                    location: FailureLocation::OutsideRegion { row: 1475575 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475613 }
+                    location: FailureLocation::OutsideRegion { row: 1475583 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475633 }
+                    location: FailureLocation::OutsideRegion { row: 1475603 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475641 }
+                    location: FailureLocation::OutsideRegion { row: 1475611 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475661 }
+                    location: FailureLocation::OutsideRegion { row: 1475631 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475669 }
+                    location: FailureLocation::OutsideRegion { row: 1475639 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475689 }
+                    location: FailureLocation::OutsideRegion { row: 1475659 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475697 }
+                    location: FailureLocation::OutsideRegion { row: 1475667 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475717 }
+                    location: FailureLocation::OutsideRegion { row: 1475687 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475725 }
+                    location: FailureLocation::OutsideRegion { row: 1475695 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475745 }
+                    location: FailureLocation::OutsideRegion { row: 1475715 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475753 }
+                    location: FailureLocation::OutsideRegion { row: 1475723 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475773 }
+                    location: FailureLocation::OutsideRegion { row: 1475743 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475781 }
+                    location: FailureLocation::OutsideRegion { row: 1475751 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475801 }
+                    location: FailureLocation::OutsideRegion { row: 1475771 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475809 }
+                    location: FailureLocation::OutsideRegion { row: 1475779 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475829 }
+                    location: FailureLocation::OutsideRegion { row: 1475799 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475837 }
+                    location: FailureLocation::OutsideRegion { row: 1475807 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475857 }
+                    location: FailureLocation::OutsideRegion { row: 1475827 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475865 }
+                    location: FailureLocation::OutsideRegion { row: 1475835 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475885 }
+                    location: FailureLocation::OutsideRegion { row: 1475855 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475893 }
+                    location: FailureLocation::OutsideRegion { row: 1475863 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475913 }
+                    location: FailureLocation::OutsideRegion { row: 1475883 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475921 }
+                    location: FailureLocation::OutsideRegion { row: 1475891 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475941 }
+                    location: FailureLocation::OutsideRegion { row: 1475911 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475949 }
+                    location: FailureLocation::OutsideRegion { row: 1475919 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475969 }
+                    location: FailureLocation::OutsideRegion { row: 1475939 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475977 }
+                    location: FailureLocation::OutsideRegion { row: 1475947 }
                 },
             ])
         );
