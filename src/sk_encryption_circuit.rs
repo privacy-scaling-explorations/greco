@@ -65,9 +65,10 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
     type FirstPhasePayload = Payload<F>;
 
     /// #### Phase 0
+
     /// In this phase, the polynomials for each matrix $S_i$ are assigned to the circuit. Namely:
     /// * polynomials `s`, `e`, `k1` are assigned to the witness table. This has to be done only once as these polynomial are common to each $S_i$ matrix
-    /// * polynomials `r1i`, `r2i` are assigned to the witness table for each $S_i$ matrix.
+    /// * polynomials `r1i`, `r2i` are assigned to the witness table for each $S_i$ matrix
 
     /// Witness values are element of the finite field $\mod{p}$. Negative coefficients $-z$ are assigned as field elements $p - z$.
 
@@ -120,30 +121,34 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
     /// - $U_i(\gamma) \times S_i(\gamma) =Ct_{0,i}(\gamma)$
 
     /// ##### Assignment
-    /// * Assign evaluations to the circuit: `ai(gamma)`, `ct0_i(gamma)` for each $i$-th CRT basis.
-    /// * Assign `cyclo(gamma)` to the circuit
-    /// * Expose `ai(gamma)`, `ct0_i(gamma)` as public inputs for each $i$-th CRT basis
+    /// * Assign evaluations to the circuit: `ai(gamma)`, `ct0i(gamma)` for each $U_i$ matrix
+    /// * Assign `cyclo(gamma)` to the circuit. This has to be done only once as the cyclotomic polynomial is common to each $U_i$ matrix
+    /// * Expose `ai(gamma)`, `ct0i(gamma)` for each $U_i$ matrix
     /// * Expose `cyclo(gamma)` as public input
 
-    /// Since these polynomials known to the verifier, the evaluation at $\gamma$ doesn't need to be constrained inside the circuit. Instead, this can be safely be performed (and verified) outside the circuit.
+    /// Since the polynomials `cyclo`, `ai` and `ct0i` are known to the verifier, the evaluation at $\gamma$ doesn't need to be constrained inside the circuit. Instead, this can be safely be performed (and verified) outside the circuit.
 
     /// ##### Range Check
 
-    /// The coefficients of the private polynomials from each $i$-th matrix $S_i$ are checked to be in the correct range.
-    /// * Range check polynomials `s`, `e`, `k1`. This has to be done only once as these polynomial are common to each $S_i$ matrix.
-    /// * Range check polynomials `r1i`, `r2i` for each `Si` matrix
+    /// The coefficients of the private polynomials from each $i$-th matrix $S_i$ are checked to be in the correct range
+    /// * Range check polynomials `s`, `e`, `k1`. This has to be done only once as these polynomial are common to each $S_i$ matrix
+    /// * Range check polynomials `r1i`, `r2i` for each $S_i$ matrix
 
     /// Since negative coefficients `-z` are assigned as `p - z` to the circuit, this might result in very large coefficients. Performing the range check on such large coefficients requires large lookup tables. To avoid this, the coefficients (both negative and positive) are shifted by a constant to make them positive and then perform the range check.
 
+    /// ##### Evaluation at $\gamma$ Constraint
+
+    /// Contrary to the polynomials `cyclo`, `ai` and `ct0i`, the polynomials belonging to each $S_i$ matrix  are not known by the verifier. Therefore, their evaluation at $\gamma$ must be constrained inside the circuit.
+
+    /// * Constrain the evaluation of the polynomials `s`, `e`, `k1` at $\gamma$. This has to be done only once as these polynomial are common to each $S_i$ matrix
+    /// * Constrain the evaluation of the polynomials `r1i`, `r2i` at $\gamma$ for each $S_i$ matrix
+
     /// ##### Correct Encryption Constraint
 
-    /// It is needed to prove that $U_i(\gamma) \times S_i(\gamma) =Ct_{0,i}(\gamma)$. This can be rewritten as `ct0i = ct0i_hat + r1i * qi + r2i * cyclo` for each $i$-th CRT basis. Where `ct0i_hat = ai * s + e + k1 * k0i`.
+    /// It is needed to prove that $U_i(\gamma) \times S_i(\gamma) =Ct_{0,i}(\gamma)$. This can be rewritten as `ct0i = ct0i_hat + r1i * qi + r2i * cyclo`, where `ct0i_hat = ai * s + e + k1 * k0i`.
 
-    /// This constrained is enforced by proving that `LHS(gamma) = RHS(gamma)`. According to the Schwartz-Zippel lemma, if this relation between polynomial when evaluated at a random point holds true, then then the polynomials are identical with high probability.
-    /// * Constrain the evaluation of the polynomials `s`, `e`, `k1` at $\gamma$. This has to be done only once as these polynomial are common to each $S_i$ matrix.
-    /// * Constrain the evaluation of the polynomials `r1i`, `r2i` at $\gamma$ for each `Si` matrix
-    /// * qi and k0i are constants to the circuit encoded during key generation. 
-    /// * Constrain that `LHS(gamma) = RHS(gamma)` for each i-th CRT basis
+    /// This constrained is enforced by proving that `LHS(gamma) = RHS(gamma)`. According to the Schwartz-Zippel lemma, if this relation between polynomial when evaluated at a random point holds true, then then the polynomials are identical with high probability. Note that `qi` and `k0i` (for each $U_i$ matrix) are constants to the circuit encoded during key generation.
+    /// * Constrain that `ct0i(gamma) = ai(gamma) * s(gamma) + e(gamma) + k1(gamma) * k0i + r1i(gamma) * qi + r2i(gamma) * cyclo(gamma)` for each $i$-th CRT basis
     fn virtual_assign_phase1(
         builder: &mut RlcCircuitBuilder<F>,
         range: &RangeChip<F>,
@@ -204,7 +209,7 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
             r1is_assigned[z].range_check(ctx_gate, range, R1_BOUNDS[z]);
         }
 
-        // CORRECT ENCRYPTION CONSTRAINT
+        // EVALUATION AT GAMMA CONSTRAINT
 
         let s_at_gamma = s_assigned.enforce_eval_at_gamma(ctx_rlc, rlc);
         let e_at_gamma = e_assigned.enforce_eval_at_gamma(ctx_rlc, rlc);
@@ -218,6 +223,8 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
         for z in 0..ct0is.len() {
             let r1i_at_gamma = r1is_assigned[z].enforce_eval_at_gamma(ctx_rlc, rlc);
             let r2i_at_gamma = r2is_assigned[z].enforce_eval_at_gamma(ctx_rlc, rlc);
+
+            // CORRECT ENCRYPTION CONSTRAINT
 
             // rhs = ai(gamma) * s(gamma) + e(gamma)
             let rhs = gate.mul_add(ctx_gate, ais_at_gamma_assigned[z], s_at_gamma, e_at_gamma);

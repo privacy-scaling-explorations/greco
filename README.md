@@ -45,3 +45,11 @@ The halo2 circuit is based on a fork of `axiom-eth` that implements two minor ch
 
 - `RlcCircuit` and `RlcExecutor` are included into a utils mod such that they can be consumed outside of the crate 
 - The `RlcCircuitInstructions` are modified to enable equality constraints on instance column in Second Phase
+
+Further testing, incorporating the whole flow of generating random parameters and random input and generating a proof can be run with:
+
+```
+python3 scripts/test.py 20
+```
+
+Where `20` is number of times the test should be run. Any error is added to the `scripts/error_log.txt` file.
