@@ -32,6 +32,7 @@ You can modify these parameters to fit your needs.
 
 As a result:
 - A file `./src/data/sk_enc_input.json` is generated including the input to the circuit that can be used for testing. It includes a random secret key, a random plaintext message and the corresponding ciphertext encrypted under the secret key.
+- A file `./src/data/sk_enc_input_zeroes.json` is generated. In this file all the coefficients of the input polynomials are set to zero. This input is used at key generation time, when the actual inputs are not known.
 - A file `./src/constants/sk_enc.rs` is generated including the generic constants for the circuit. Note that we separate them from the input because these should be known at compile time.
 
 On top of that, the console will print an estimatation of the number of advice cells needed to compile the circuit in halo2 considering a single advice column and a lookup table of size 2^8.

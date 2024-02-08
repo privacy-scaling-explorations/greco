@@ -410,9 +410,27 @@ def main(args):
         f.write(f"/// List of scalars `k0is` such that `k0i[i]` is equal to the negative of the multiplicative inverses of t mod qi.\n")
         f.write(f"pub const K0IS: [&str; {len(k0i_constants)}] = [{k0is_str}];\n")
 
-    # write the inputs to a json file
     with open(args.output_input, 'w') as f:
         json.dump(json_input, f)
+
+    # Initialize a structure to hold polynomials with zero coefficients. This will be used at key generation.
+    json_input_zeroes = {
+        "s": ["0" for _ in s_assigned.coefficients],
+        "e": ["0" for _ in e_assigned.coefficients],
+        "k1": ["0" for _ in k1_assigned.coefficients],
+        "r2is": [["0" for _ in r2i.coefficients] for r2i in r2is_assigned],
+        "r1is": [["0" for _ in r1i.coefficients] for r1i in r1is_assigned],
+        "ais": [["0" for _ in ai_in_p.coefficients] for ai_in_p in ais_in_p],
+        "ct0is": [["0" for _ in ct0i_in_p.coefficients] for ct0i_in_p in ct0is_in_p],
+    }
+
+    original_output_path = args.output_input
+    path_parts = original_output_path.rsplit('.', 1)
+    zeroed_output_path = f"{path_parts[0]}_zeroes.{path_parts[1]}"
+
+    with open(zeroed_output_path, 'w') as f:
+        json.dump(json_input_zeroes, f)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

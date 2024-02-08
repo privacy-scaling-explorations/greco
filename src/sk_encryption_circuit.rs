@@ -294,12 +294,13 @@ mod test {
 
     #[test]
     pub fn test_sk_enc_full_prover() {
-        // 1. Define the inputs of the circuit
-        let file_path = "src/data/sk_enc_input.json";
-        let mut file = File::open(file_path).unwrap();
+        // 1. Define the inputs of the circuit.
+        // Since we are going to use this circuit instance for key gen, we can use an input file in which all the coefficients are set to 0
+        let file_path_zeroes = "src/data/sk_enc_input_zeroes.json";
+        let mut file = File::open(file_path_zeroes).unwrap();
         let mut data = String::new();
         file.read_to_string(&mut data).unwrap();
-        let sk_enc_circuit = serde_json::from_str::<BfvSkEncryptionCircuit>(&data).unwrap();
+        let empty_sk_enc_circuit = serde_json::from_str::<BfvSkEncryptionCircuit>(&data).unwrap();
 
         // 2. Generate (unsafe) trusted setup parameters
         // Here we are setting a small k for optimization purposes
@@ -311,7 +312,7 @@ mod test {
             RlcCircuitBuilder::from_stage(CircuitBuilderStage::Keygen, 0).use_k(k);
         key_gen_builder.base.set_lookup_bits(k - 1); // lookup bits set to `k-1` as suggested [here](https://docs.axiom.xyz/protocol/zero-knowledge-proofs/getting-started-with-halo2#technical-detail-how-to-choose-lookup_bits)
 
-        let rlc_circuit = RlcExecutor::new(key_gen_builder, sk_enc_circuit.clone());
+        let rlc_circuit = RlcExecutor::new(key_gen_builder, empty_sk_enc_circuit.clone());
 
         // The parameters are auto configured by halo2 lib to fit all the columns into the `k`-sized table
         let rlc_circuit_params = rlc_circuit.0.calculate_params(Some(9));
@@ -333,6 +334,12 @@ mod test {
             RlcCircuitBuilder::from_stage(CircuitBuilderStage::Prover, 0)
                 .use_params(rlc_circuit_params);
         proof_gen_builder.base.set_lookup_bits(k - 1);
+
+        let file_path = "src/data/sk_enc_input.json";
+        let mut file = File::open(file_path).unwrap();
+        let mut data = String::new();
+        file.read_to_string(&mut data).unwrap();
+        let sk_enc_circuit = serde_json::from_str::<BfvSkEncryptionCircuit>(&data).unwrap();
 
         let rlc_circuit = RlcExecutor::new(proof_gen_builder, sk_enc_circuit.clone());
 
