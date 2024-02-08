@@ -5,7 +5,7 @@ from bfv.polynomial import Polynomial, poly_div
 from bfv.utils import mod_inverse
 from random import randint
 import copy
-from utils import assign_to_circuit
+from utils import assign_to_circuit, count_advice_cells_needed_for_poly_range_check, print_advice_cells_info
 import argparse
 import json
 
@@ -145,11 +145,16 @@ def main(args):
     # `r2_bounds` are the bounds for the coefficients of r2i for each CRT basis
     r2_bounds = []
 
+    # initiate counters for the number of advice cells needed for each constraint phase
+    phase_0_assignment_advice_cell_count = 0
+    phase_1_assignment_advice_cell_count = 0
+    phase_1_range_check_advice_cell_count = 0
+    phase_1_eval_at_gamma_constraint_advice_cell_count = 0
+    phase_1_encryption_constraint_advice_cell_count = 0
+
     '''
     CIRCUIT - PHASE 0 - ASSIGNMENT
     '''
-
-    phase_0_assignment_advice_cell_count = 0
 
     # Every assigned value must be an element of the field Zp. Negative coefficients `-z` are assigned as `p - z`
     s_assigned = assign_to_circuit(s, p)    
@@ -178,8 +183,6 @@ def main(args):
     '''
     CIRCUIT - PHASE 1 - ASSIGNMENT
     '''
-
-    phase_1_assignment_advice_cell_count = 0
 
     # Every assigned value must be an element of the field Zp. Negative coefficients `-z` are assigned as `p - z`
     ais_at_gamma_assigned = []
@@ -214,14 +217,19 @@ def main(args):
     CIRCUIT - PHASE 1 - RANGE CHECK
     '''
 
+    lookup_bits = 8
+
+    s_bound = 1
     # constraint. The coefficients of s should be in the range [-1, 0, 1]
-    assert all(coeff in [-1, 0, 1] for coeff in s.coefficients)
+    assert all(coeff >= -s_bound and coeff <= s_bound for coeff in s.coefficients)
     # After the circuit assignement, the coefficients of s_assigned must be in [0, 1, p - 1]
-    assert all(coeff in [0, 1, p - 1] for coeff in s_assigned.coefficients)
+    assert all(coeff in range(0, s_bound+1) or coeff in range(p - s_bound, p) for coeff in s_assigned.coefficients)
     # To perform a range check with a smaller lookup table, we shift the coefficients of s_assigned to be in [0, 1, 2] (the shift operation is constrained inside the circuit)
     s_shifted = Polynomial([(coeff + 1) % p for coeff in s_assigned.coefficients])
-    assert all(coeff in [0, 1, 2] for coeff in s_shifted.coefficients)
+    assert all(coeff >= 0 and coeff <= 2*s_bound for coeff in s_shifted.coefficients)
 
+    phase_1_range_check_advice_cell_count += count_advice_cells_needed_for_poly_range_check(s_assigned, 2*s_bound + 1, lookup_bits)
+    
     # constraint. The coefficients of e should be in the range [-B, B] where B is the upper bound of the discrete Gaussian distribution
     b = int(discrete_gaussian.z_upper)
     assert all(coeff >= -b and coeff <= b for coeff in e.coefficients)
@@ -231,6 +239,8 @@ def main(args):
     e_shifted = Polynomial([(coeff + b) % p for coeff in e_assigned.coefficients])
     assert all(coeff >= 0 and coeff <= 2*b for coeff in e_shifted.coefficients)
 
+    phase_1_range_check_advice_cell_count += count_advice_cells_needed_for_poly_range_check(e_assigned, 2*b + 1, lookup_bits)
+    
     # constraint. The coefficients of k1 should be in the range [-(t-1)/2, (t-1)/2]
     k1_bound = int((t - 1) / 2)
     assert all(coeff >= -k1_bound and coeff <= k1_bound for coeff in k1.coefficients)
@@ -240,7 +250,7 @@ def main(args):
     k1_shifted = Polynomial([(coeff + int(k1_bound)) % p for coeff in k1_assigned.coefficients])
     assert all(coeff >= 0 and coeff <= 2*k1_bound for coeff in k1_shifted.coefficients)
 
-    phase_1_eval_at_gamma_constraint_advice_cell_count = 0
+    phase_1_range_check_advice_cell_count += count_advice_cells_needed_for_poly_range_check(k1_assigned, 2*k1_bound + 1, lookup_bits)
 
     s_at_gamma_assigned = s_assigned.evaluate(gamma)
     phase_1_eval_at_gamma_constraint_advice_cell_count += len(s_assigned.coefficients) * 2 - 1
@@ -280,6 +290,8 @@ def main(args):
         r2i_shifted = Polynomial([(coeff + int(r2i_bound)) % p for coeff in r2is_assigned[i].coefficients])
         assert all(coeff >= 0 and coeff <= 2*r2i_bound for coeff in r2i_shifted.coefficients)
 
+        phase_1_range_check_advice_cell_count += count_advice_cells_needed_for_poly_range_check(r2is_assigned[i], 2*r2i_bound + 1, lookup_bits)
+
         # sanity check. The coefficients of r2i * cyclo should be in the range [-(qi-1)/2, (qi-1)/2]
         bound = int((qis[i] - 1) / 2)
         res = r2is[i] * cyclo
@@ -316,6 +328,8 @@ def main(args):
         r1i_shifted = Polynomial([(coeff + int(r1i_bound)) % p for coeff in r1is_assigned[i].coefficients])
         assert all(coeff >= 0 and coeff <= 2*r1i_bound for coeff in r1i_shifted.coefficients)
 
+        phase_1_range_check_advice_cell_count += count_advice_cells_needed_for_poly_range_check(r1is_assigned[i], 2*r1i_bound + 1, lookup_bits)
+
         '''
         CIRCUIT - PHASE 1 - EVALUATION AT GAMMA CONSTRAINT
         '''
@@ -332,7 +346,8 @@ def main(args):
 
         lhs = ct0is_at_gamma_assigned[i]
         rhs = (ais_at_gamma_assigned[i] * s_at_gamma_assigned + e_at_gamma_assigned + (k1_at_gamma_assigned * k0i_constants[i]) + (r1i_gamma_assigned * qi_constants[i]) + (r2i_gamma_assigned * cyclo_at_gamma_assigned))
-        
+        phase_1_encryption_constraint_advice_cell_count += 16
+
         assert lhs % p == rhs % p
 
         '''
@@ -356,6 +371,9 @@ def main(args):
         k0i_assigned_expected = assign_to_circuit(k0is[i], p).coefficients[0]
         assert k0i_constants[i] == k0i_assigned_expected
 
+    total_advice_cell_count = phase_0_assignment_advice_cell_count + phase_1_assignment_advice_cell_count + phase_1_range_check_advice_cell_count + phase_1_eval_at_gamma_constraint_advice_cell_count + phase_1_encryption_constraint_advice_cell_count
+
+    print_advice_cells_info(total_advice_cell_count, phase_0_assignment_advice_cell_count, phase_1_assignment_advice_cell_count, phase_1_range_check_advice_cell_count, phase_1_eval_at_gamma_constraint_advice_cell_count, phase_1_encryption_constraint_advice_cell_count)
     # ais and ct0is need to be parsed such that their coefficients are in the range [0, p - 1]
     # we don't call them assigned because they are never assigned to the circuit
     ais_in_p = [assign_to_circuit(ai, p) for ai in ais]
