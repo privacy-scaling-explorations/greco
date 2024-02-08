@@ -280,9 +280,9 @@ def main(args):
         r1_bounds.append(r1i_bound)
         assert all(coeff >= -r1i_bound and coeff <= r1i_bound for coeff in r1is[i].coefficients)
         # After the circuit assignement, the coefficients of r1i_assigned must be in [0, r1i_bound] or [p - r1i_bound, p - 1]
-        assert all(coeff in range(0, int(r1i_bound) + 1) or coeff in range(p - int(r1i_bound), p) for coeff in r1is_assigned[0].coefficients)
+        assert all(coeff in range(0, int(r1i_bound) + 1) or coeff in range(p - int(r1i_bound), p) for coeff in r1is_assigned[i].coefficients)
         # To perform a range check with a smaller lookup table, we shift the coefficients of r1i_assigned to be in [0, 2*r1i_bound] (the shift operation is constrained inside the circuit)
-        r1i_shifted = Polynomial([(coeff + int(r1i_bound)) % p for coeff in r1is_assigned[0].coefficients])
+        r1i_shifted = Polynomial([(coeff + int(r1i_bound)) % p for coeff in r1is_assigned[i].coefficients])
         assert all(coeff >= 0 and coeff <= 2*r1i_bound for coeff in r1i_shifted.coefficients)
 
         s_at_gamma_assigned = s_assigned.evaluate(gamma)
@@ -335,28 +335,29 @@ def main(args):
         "ct0is": [[str(coef) for coef in ct0i_in_p.coefficients] for ct0i_in_p in ct0is_in_p],
     }
 
-    # write the inputs to a json file
-    with open(args.output, 'w') as f:
-        json.dump(json_input, f)
+    with open(args.output_constants, 'w') as f:
+        f.write(f"/// `N` is the degree of the cyclotomic polynomial defining the ring `Rq = Zq[X]/(X^N + 1)`.\n")
+        f.write(f"pub const N: usize = {n};\n")
+        f.write(f"/// The coefficients of the polynomial `e` should exist in the interval `[-E_BOUND, E_BOUND]` where `E_BOUND` is the upper bound of the gaussian distribution with 𝜎 = 3.2\n")
+        f.write(f"pub const E_BOUND: u64 = {b};\n")
+        f.write(f"/// The coefficients of the polynomial `s` should exist in the interval `[-S_BOUND, S_BOUND]`.\n")
+        f.write(f"pub const S_BOUND: u64 = {1};\n")
+        f.write(f"/// The coefficients of the polynomials `r1is` should exist in the interval `[-R1_BOUND[i], R1_BOUND[i]]` where `R1_BOUND[i]` is equal to `(qi-1)/2`\n")
+        f.write(f"pub const R1_BOUNDS: [u64; {len(r1_bounds)}] = [{', '.join(map(str, r1_bounds))}];\n")
+        f.write(f"/// The coefficients of the polynomials `r2is` should exist in the interval `[-R2_BOUND[i], R2_BOUND[i]]` where `R2_BOUND[i]` is equal to $\\frac{{(N+2) \\cdot \\frac{{q_i - 1}}{{2}} + B + \\frac{{t - 1}}{{2}} \\cdot |K_{{0,i}}|}}{{q_i}}$\n")
+        f.write(f"pub const R2_BOUNDS: [u64; {len(r2_bounds)}] = [{', '.join(map(str, r2_bounds))}];\n")
+        f.write(f"/// The coefficients of `k1` should exist in the interval `[-K1_BOUND, K1_BOUND]` where `K1_BOUND` is equal to `(t-1)/2`\n")
+        f.write(f"pub const K1_BOUND: u64 = {k1_bound};\n")
+        qis_str = ', '.join(f'"{q}"' for q in qis_assigned)
+        f.write(f"/// List of scalars `qis` such that `qis[i]` is the modulus of the i-th CRT basis of `q` (ciphertext space modulus)\n")
+        f.write(f"pub const QIS: [&str; {len(qis_assigned)}] = [{qis_str}];\n")
+        k0is_str = ', '.join(f'"{k0i}"' for k0i in k0is_assigned)
+        f.write(f"/// List of scalars `k0is` such that `k0i[i]` is equal to the negative of the multiplicative inverses of t mod qi.\n")
+        f.write(f"pub const K0IS: [&str; {len(k0is_assigned)}] = [{k0is_str}];\n")
 
-    print(f"/// `N` is the degree of the cyclotomic polynomial defining the ring `Rq = Zq[X]/(X^N + 1)`.")
-    print(f"pub const N: usize = {n};")
-    print(f"/// The coefficients of the polynomial `e` should exist in the interval `[-E_BOUND, E_BOUND]` where `E_BOUND` is the upper bound of the gaussian distribution with 𝜎 = 3.2")
-    print(f"pub const E_BOUND: u64 = {b};")
-    print(f"/// The coefficients of the plynomial `s` should exist in the interval `[-S_BOUND, S_BOUND]`.")
-    print(f"pub const S_BOUND: u64 = {1};")
-    print(f"/// The coefficients of the polynomials `r1is` should exist in the interval `[-R1_BOUND[i], R1_BOUND[i]]` where `R1_BOUND[i]` is equal to `(qi-1)/2`")
-    print(f"pub const R1_BOUNDS: [u64; {len(r1_bounds)}] = [{', '.join(map(str, r1_bounds))}];")
-    print(f"/// The coefficients of the polynomials `r2is` should exist in the interval `[-R2_BOUND[i], R2_BOUND[i]]` where `R2_BOUND[i]` is equal to $\\frac{{(N+2) \\cdot \\frac{{q_i - 1}}{{2}} + B + \\frac{{t - 1}}{{2}} \\cdot |K_{{0,i}}|}}{{q_i}}$")
-    print(f"pub const R2_BOUNDS: [u64; {len(r2_bounds)}] = [{', '.join(map(str, r2_bounds))}];")
-    print(f"/// The coefficients of `k1` should exist in the interval `[-K1_BOUND, K1_BOUND]` where `K1_BOUND` is equal to `(t-1)/2`")
-    print(f"pub const K1_BOUND: u64 = {k1_bound};")
-    qis_str = ', '.join(f'"{q}"' for q in qis_assigned)
-    print(f"/// List of scalars `qis` such that `qis[i]` is the modulus of the i-th CRT basis of `q` (ciphertext space modulus)")
-    print(f"pub const QIS: [&str; {len(qis_assigned)}] = [{qis_str}];")
-    k0is_str = ', '.join(f'"{k0i}"' for k0i in k0is_assigned)
-    print(f"/// List of scalars `k0is` such that `k0i[i]` is equal to the negative of the multiplicative inverses of t mod qi.")
-    print(f"pub const K0IS: [&str; {len(k0is_assigned)}] = [{k0is_str}];")
+    # write the inputs to a json file
+    with open(args.output_input, 'w') as f:
+        json.dump(json_input, f)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -372,7 +373,10 @@ if __name__ == "__main__":
         "-t", type=int, required=True, help="Modulus t of the plaintext space."
     )
     parser.add_argument(
-        "-output", type=str, required=True, default="./src/data/sk_enc_input.json", help="Output file name."
+        "-output_input", type=str, required=True, help="Path for the output json file containing the inputs for the circuit."
+    )
+    parser.add_argument(
+        "-output_constants", type=str, required=True, help="Path for the output rust file containing the constants for the circuit."
     )
 
     args = parser.parse_args()

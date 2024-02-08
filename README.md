@@ -4,10 +4,10 @@ Circuit for proving the correct encryption under BFV fully homomorphic encryptio
 
 ### Generate Parameters
 
-To generate the parameters for the secret key proof of encryption run the following command:
+To generate the parameters for the secret key proof of encryption circuit run the following command:
 
 ```bash
-python3 scripts/circuit_sk.py -n 1024 -qis '[                                                   
+python3 scripts/circuit_sk.py -n 1024 -qis '[                                      
     1152921504606584833,
     1152921504598720513,
     1152921504597016577,
@@ -23,28 +23,16 @@ python3 scripts/circuit_sk.py -n 1024 -qis '[
     1152921504581877761,
     1152921504581419009,
     1152921504580894721
-]' -t 65537  -output ./src/data/sk_enc_input.json
+]' -t 65537  -output_input ./src/data/sk_enc_input.json -output_constants ./src/constants/sk_enc.rs
 ```
 
-Where `-n` is the degree of the polynomial, `-qis` is the list of moduli qis such that qis[i] is the modulus of the i-th CRT basis of the modulus q of the ciphertext space, `-t` is the plaintext modulus and `-output` is path to the output file. The value of `𝜎` for the gaussian distribution is set to 3.2 by default.
+Where `-n` is the degree of the polynomial, `-qis` is the list of moduli qis such that qis[i] is the modulus of the i-th CRT basis of the modulus q of the ciphertext space, `-t` is the plaintext modulus and `-output_input` is path to the json file containing the circuit input and `-output_constants` is the path to the rust file containing the circuit generic constants. The value of `𝜎` for the gaussian distribution is set to 3.2 by default.
 
 You can modify these parameters to fit your needs.
 
-As a result, the file `./src/data/sk_enc_input.json` will be generated including the input to the circuit. On top of that, the terminal will print the constants that need to be added to the halo2 circuit.
-
-```rust
-
-pub const N: usize = 1024;
-pub const E_BOUND: u64 = 19;
-pub const S_BOUND: u64 = 1;
-pub const R1_BOUNDS: [u64; 15] = [1321, 12139, 1692, 1530, 19009, 17587, 3417, 15539, 24450, 19013, 24041, 5934, 31437, 16662, 15909];
-pub const R2_BOUNDS: [u64; 15] = [576460752303292416, 576460752299360256, 576460752298508288, 576460752297984000, 576460752297820160, 576460752296706048, 576460752296411136, 576460752296214528, 576460752294969344, 576460752293265408, 576460752292773888, 576460752291823616, 576460752290938880, 576460752290709504, 576460752290447360];
-pub const K1_BOUND: u64 = 32768;
-pub const QIS: [&str; 15] = ["1152921504606584833", "1152921504598720513", "1152921504597016577", "1152921504595968001", "1152921504595640321", "1152921504593412097", "1152921504592822273", "1152921504592429057", "1152921504589938689", "1152921504586530817", "1152921504585547777", "1152921504583647233", "1152921504581877761", "1152921504581419009", "1152921504580894721"];
-pub const K0IS: [&str; 15] = ["21888242871839275222246405745257275088548364400416034343698175722853110577582", "21888242871839275222246405745257275088548364400416034343697795104123637376298", "21888242871839275222246405745257275088548364400416034343698162687242159650505", "21888242871839275222246405745257275088548364400416034343698168387023466264589", "21888242871839275222246405745257275088548364400416034343697553391175637430142", "21888242871839275222246405745257275088548364400416034343697603422589329635994", "21888242871839275222246405745257275088548364400416034343698101995126395496783", "21888242871839275222246405745257275088548364400416034343697675479083872324250", "21888242871839275222246405745257275088548364400416034343697361955928178181372", "21888242871839275222246405745257275088548364400416034343697553250440301670262", "21888242871839275222246405745257275088548364400416034343697376346116788602926", "21888242871839275222246405745257275088548364400416034343698013419821216355748", "21888242871839275222246405745257275088548364400416034343697116144063382163047", "21888242871839275222246405745257275088548364400416034343697635967636919321044", "21888242871839275222246405745257275088548364400416034343697662478656761857975"];
-```
-
-These constants are then to be added to `src/constants/sk_enc.rs` file. Note that we define them as constants and not as inputs because these should be known at compile time.
+As a result:
+- A file `./src/data/sk_enc_input.json` is generated including the input to the circuit that can be used for testing. It includes a random secret key, a random plaintext message and the corresponding ciphertext encrypted under the secret key.
+- A file `./src/constants/sk_enc.rs` is generated including the generic constants for the circuit. Note that we separate them from the input because these should be known at compile time.
 
 ### Circuit
 
