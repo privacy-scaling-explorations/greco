@@ -146,13 +146,19 @@ def main(args):
     r2_bounds = []
 
     '''
-    CIRCUIT - PHASE 0
+    CIRCUIT - PHASE 0 - ASSIGNMENT
     '''
 
+    phase_0_assignment_advice_cell_count = 0
+
     # Every assigned value must be an element of the field Zp. Negative coefficients `-z` are assigned as `p - z`
-    s_assigned = assign_to_circuit(s, p)
+    s_assigned = assign_to_circuit(s, p)    
     e_assigned = assign_to_circuit(e, p)
     k1_assigned = assign_to_circuit(k1, p)
+
+    phase_0_assignment_advice_cell_count += len(s_assigned.coefficients)
+    phase_0_assignment_advice_cell_count += len(e_assigned.coefficients)
+    phase_0_assignment_advice_cell_count += len(k1_assigned.coefficients)
 
     r1is_assigned = []
     r2is_assigned = []
@@ -163,36 +169,50 @@ def main(args):
         r1is_assigned.append(r1i_assigned)
         r2is_assigned.append(r2i_assigned)
 
+        phase_0_assignment_advice_cell_count += len(r1i_assigned.coefficients)
+        phase_0_assignment_advice_cell_count += len(r2i_assigned.coefficients)
 
     # For the sake of simplicity, we generate a random challenge here
     gamma = randint(0, 1000)
 
     '''
-    CIRCUIT - PHASE 1
+    CIRCUIT - PHASE 1 - ASSIGNMENT
     '''
+
+    phase_1_assignment_advice_cell_count = 0
 
     # Every assigned value must be an element of the field Zp. Negative coefficients `-z` are assigned as `p - z`
     ais_at_gamma_assigned = []
     ct0is_at_gamma_assigned = []
-    qis_assigned = []
-    k0is_assigned = []
+    qi_constants = []
+    k0i_constants = []
 
     for i in range(len(ctis)):
         ai_at_gamma = ais[i].evaluate(gamma)
         ai_at_gamma_assigned = assign_to_circuit(Polynomial([ai_at_gamma]), p).coefficients[0]
         ais_at_gamma_assigned.append(ai_at_gamma_assigned)
 
+        phase_1_assignment_advice_cell_count += 1
+
         ct0i_at_gamma = ctis[i][0].evaluate(gamma)
         ct0i_at_gamma_assigned = assign_to_circuit(Polynomial([ct0i_at_gamma]), p).coefficients[0]
         ct0is_at_gamma_assigned.append(ct0i_at_gamma_assigned)
 
-        qis_assigned.append(qis[i])
+        phase_1_assignment_advice_cell_count += 1
 
-        k0i_assigned = assign_to_circuit(k0is[i], p).coefficients[0]
-        k0is_assigned.append(k0i_assigned)
+        qi_constants.append(qis[i])
+
+        k0i_constant = assign_to_circuit(k0is[i], p).coefficients[0]
+        k0i_constants.append(k0i_constant)
 
     cyclo_at_gamma = cyclo.evaluate(gamma)
     cyclo_at_gamma_assigned = assign_to_circuit(Polynomial([cyclo_at_gamma]), p).coefficients[0]
+
+    phase_1_assignment_advice_cell_count += 1
+
+    '''
+    CIRCUIT - PHASE 1 - RANGE CHECK
+    '''
 
     # constraint. The coefficients of s should be in the range [-1, 0, 1]
     assert all(coeff in [-1, 0, 1] for coeff in s.coefficients)
@@ -219,6 +239,17 @@ def main(args):
     # To perform a range check with a smaller lookup table, we shift the coefficients of k1_assigned to be in [0, 2*k1_bound] (the shift operation is constrained inside the circuit)
     k1_shifted = Polynomial([(coeff + int(k1_bound)) % p for coeff in k1_assigned.coefficients])
     assert all(coeff >= 0 and coeff <= 2*k1_bound for coeff in k1_shifted.coefficients)
+
+    phase_1_eval_at_gamma_constraint_advice_cell_count = 0
+
+    s_at_gamma_assigned = s_assigned.evaluate(gamma)
+    phase_1_eval_at_gamma_constraint_advice_cell_count += len(s_assigned.coefficients) * 2 - 1
+
+    e_at_gamma_assigned = e_assigned.evaluate(gamma)
+    phase_1_eval_at_gamma_constraint_advice_cell_count += len(e_assigned.coefficients) * 2 - 1
+
+    k1_at_gamma_assigned = k1_assigned.evaluate(gamma)
+    phase_1_eval_at_gamma_constraint_advice_cell_count += len(k1_assigned.coefficients) * 2 - 1
 
     for i in range(len(ctis)):
         # sanity check. The coefficients of ct0i should be in the range [-(qi-1)/2, (qi-1)/2]
@@ -285,17 +316,24 @@ def main(args):
         r1i_shifted = Polynomial([(coeff + int(r1i_bound)) % p for coeff in r1is_assigned[i].coefficients])
         assert all(coeff >= 0 and coeff <= 2*r1i_bound for coeff in r1i_shifted.coefficients)
 
-        s_at_gamma_assigned = s_assigned.evaluate(gamma)
-        e_at_gamma_assigned = e_assigned.evaluate(gamma)
-        k1_at_gamma_assigned = k1_assigned.evaluate(gamma)
+        '''
+        CIRCUIT - PHASE 1 - EVALUATION AT GAMMA CONSTRAINT
+        '''
 
-        for i in range(len(ctis)):
-            r1i_gamma_assigned = r1is_assigned[i].evaluate(gamma)
-            r2i_gamma_assigned = r2is_assigned[i].evaluate(gamma)
-            lhs = ct0is_at_gamma_assigned[i]
-            rhs = (ais_at_gamma_assigned[i] * s_at_gamma_assigned + e_at_gamma_assigned + (k1_at_gamma_assigned * k0is_assigned[i]) + (r1i_gamma_assigned * qis_assigned[i]) + (r2i_gamma_assigned * cyclo_at_gamma_assigned))
-            
-            assert lhs % p == rhs % p
+        r1i_gamma_assigned = r1is_assigned[i].evaluate(gamma)
+        r2i_gamma_assigned = r2is_assigned[i].evaluate(gamma)
+
+        phase_1_eval_at_gamma_constraint_advice_cell_count += len(r1is_assigned[i].coefficients) * 2 - 1
+        phase_1_eval_at_gamma_constraint_advice_cell_count += len(r2is_assigned[i].coefficients) * 2 - 1
+
+        '''
+        CIRCUIT - PHASE 1 - CORRECT ENCRYPTION CONSTRAINT
+        '''
+
+        lhs = ct0is_at_gamma_assigned[i]
+        rhs = (ais_at_gamma_assigned[i] * s_at_gamma_assigned + e_at_gamma_assigned + (k1_at_gamma_assigned * k0i_constants[i]) + (r1i_gamma_assigned * qi_constants[i]) + (r2i_gamma_assigned * cyclo_at_gamma_assigned))
+        
+        assert lhs % p == rhs % p
 
         '''
         VERIFICATION PHASE
@@ -305,19 +343,18 @@ def main(args):
         cyclo_at_gamma_assigned_expected = assign_to_circuit(Polynomial([cyclo_at_gamma]), p).coefficients[0]
         assert cyclo_at_gamma_assigned == cyclo_at_gamma_assigned_expected
 
-        for i in range(len(ctis)):
-            ai_gamma = ais[i].evaluate(gamma)
-            ai_gamma_assigned_expected = assign_to_circuit(Polynomial([ai_gamma]), p).coefficients[0]
-            assert ais_at_gamma_assigned[i] == ai_gamma_assigned_expected
+        ai_gamma = ais[i].evaluate(gamma)
+        ai_gamma_assigned_expected = assign_to_circuit(Polynomial([ai_gamma]), p).coefficients[0]
+        assert ais_at_gamma_assigned[i] == ai_gamma_assigned_expected
 
-            ct0i_gamma = ctis[i][0].evaluate(gamma)
-            ct0i_gamma_assigned_expected = assign_to_circuit(Polynomial([ct0i_gamma]), p).coefficients[0]
-            assert ct0is_at_gamma_assigned[i] == ct0i_gamma_assigned_expected
+        ct0i_gamma = ctis[i][0].evaluate(gamma)
+        ct0i_gamma_assigned_expected = assign_to_circuit(Polynomial([ct0i_gamma]), p).coefficients[0]
+        assert ct0is_at_gamma_assigned[i] == ct0i_gamma_assigned_expected
 
-            assert qis[i] == qis_assigned[i]
+        assert qis[i] == qi_constants[i]
 
-            k0i_assigned_expected = assign_to_circuit(k0is[i], p).coefficients[0]
-            assert k0is_assigned[i] == k0i_assigned_expected
+        k0i_assigned_expected = assign_to_circuit(k0is[i], p).coefficients[0]
+        assert k0i_constants[i] == k0i_assigned_expected
 
     # ais and ct0is need to be parsed such that their coefficients are in the range [0, p - 1]
     # we don't call them assigned because they are never assigned to the circuit
@@ -348,12 +385,12 @@ def main(args):
         f.write(f"pub const R2_BOUNDS: [u64; {len(r2_bounds)}] = [{', '.join(map(str, r2_bounds))}];\n")
         f.write(f"/// The coefficients of `k1` should exist in the interval `[-K1_BOUND, K1_BOUND]` where `K1_BOUND` is equal to `(t-1)/2`\n")
         f.write(f"pub const K1_BOUND: u64 = {k1_bound};\n")
-        qis_str = ', '.join(f'"{q}"' for q in qis_assigned)
+        qis_str = ', '.join(f'"{q}"' for q in qi_constants)
         f.write(f"/// List of scalars `qis` such that `qis[i]` is the modulus of the i-th CRT basis of `q` (ciphertext space modulus)\n")
-        f.write(f"pub const QIS: [&str; {len(qis_assigned)}] = [{qis_str}];\n")
-        k0is_str = ', '.join(f'"{k0i}"' for k0i in k0is_assigned)
+        f.write(f"pub const QIS: [&str; {len(qi_constants)}] = [{qis_str}];\n")
+        k0is_str = ', '.join(f'"{k0i}"' for k0i in k0i_constants)
         f.write(f"/// List of scalars `k0is` such that `k0i[i]` is equal to the negative of the multiplicative inverses of t mod qi.\n")
-        f.write(f"pub const K0IS: [&str; {len(k0is_assigned)}] = [{k0is_str}];\n")
+        f.write(f"pub const K0IS: [&str; {len(k0i_constants)}] = [{k0is_str}];\n")
 
     # write the inputs to a json file
     with open(args.output_input, 'w') as f:
