@@ -56,7 +56,7 @@ def count_advice_cells_needed_for_poly_range_check(poly: Polynomial, bound: int,
     return count
 
 def print_advice_cells_info(total_advice_cell_count, phase_0_count, phase_1_assignment_count, phase_1_range_check_count, phase_1_eval_at_gamma_count, phase_1_encryption_constraint_count):
-    print("Advice Cells Information:")
+    print("Halo2 Circuit Profile:")
     print(f"Total Advice Cells Needed: {total_advice_cell_count}")
     
     print("\nPhase 0 - Assignment:")
