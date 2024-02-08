@@ -46,11 +46,10 @@ impl<F: ScalarField> PolyAssigned<F> {
     }
 
     /// Adds `upper_bound` to the coefficients of the polynomial and constrains them to be in the range `[0, 2*upper_bound]`.
-    /// TODO: we can make this a bit more efficient by not having to reassign the constant every time
     pub fn range_check(&self, ctx_gate: &mut Context<F>, range: &RangeChip<F>, upper_bound: u64) {
         let bound_constant = Constant(F::from(upper_bound));
 
-        for coeff in self.assigned_coefficients.iter() {
+        for coeff in &self.assigned_coefficients {
             let shifted_coeff = range.gate().add(ctx_gate, *coeff, bound_constant);
             range.check_less_than_safe(ctx_gate, shifted_coeff, (2 * upper_bound) + 1);
         }

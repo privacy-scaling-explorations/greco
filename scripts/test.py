@@ -33,7 +33,7 @@ with open(error_log_file, "w") as error_log:
         print(f"Running iteration: {i + 1}/{runs}")  # Print the current iteration
         
         # Generate qis randomly
-        start = getrandbits(59)  # Start with a random 59-bit number
+        start = getrandbits(60)  # Start with a random 60-bit number
         qis = find_odd_pairwise_coprimes(start, 15)  # Find 15 pairwise coprimes starting from `start`
         
         # Convert qis list to string format expected by the script
