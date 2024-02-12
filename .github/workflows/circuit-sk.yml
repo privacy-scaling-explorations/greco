@@ -24,6 +24,7 @@ jobs:
 
     - name: Generate Parameters for circuit and Run Tests
       run: |
+        export DPS=41
         python3 scripts/circuit_sk.py -n 1024 -qis '[                                      
             1152921504606584833,
             1152921504598720513,
