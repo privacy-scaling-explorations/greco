@@ -246,23 +246,27 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
 #[cfg(test)]
 mod test {
 
-    use std::{fs::File, io::Read};
-
     use super::test_params;
     use crate::{constants::sk_enc::R1_BOUNDS, sk_encryption_circuit::BfvSkEncryptionCircuit};
-    use axiom_eth::rlc::{circuit::builder::RlcCircuitBuilder, utils::executor::RlcExecutor};
+    use axiom_eth::{
+        halo2curves::bn256::Bn256,
+        rlc::{circuit::builder::RlcCircuitBuilder, utils::executor::RlcExecutor},
+    };
     use halo2_base::{
         gates::circuit::CircuitBuilderStage,
         halo2_proofs::{
             dev::{FailureLocation, MockProver, VerifyFailure},
             halo2curves::bn256::Fr,
             plonk::{keygen_pk, keygen_vk, Any, SecondPhase},
+            poly::kzg::commitment::ParamsKZG,
         },
         utils::{
             fs::gen_srs,
             testing::{check_proof, gen_proof},
         },
     };
+    use prettytable::{row, Table};
+    use std::{fs::File, io::Read};
 
     #[test]
     pub fn test_sk_enc_valid() {
@@ -318,16 +322,10 @@ mod test {
         let rlc_circuit_params = rlc_circuit.0.calculate_params(Some(9));
 
         // 4. Generate the verification key and the proving key
-        println!("vk gen started");
         let vk = keygen_vk(&kzg_params, &rlc_circuit).unwrap();
-        println!("vk gen done");
         let pk = keygen_pk(&kzg_params, vk, &rlc_circuit).unwrap();
-        println!("pk gen done");
         let break_points = rlc_circuit.0.builder.borrow().break_points();
         drop(rlc_circuit);
-
-        println!();
-        println!("==============STARTING PROOF GEN===================");
 
         // 5. Generate the proof, here we pass the actual inputs
         let mut proof_gen_builder: RlcCircuitBuilder<Fr> =
@@ -348,14 +346,10 @@ mod test {
             .builder
             .borrow_mut()
             .set_break_points(break_points);
-        let timer = std::time::Instant::now();
         let proof = gen_proof(&kzg_params, &pk, rlc_circuit);
-        println!("proof gen done");
-        println!("Proof generation time: {:?}", timer.elapsed());
 
         // 6. Verify the proof
         check_proof(&kzg_params, pk.get_vk(), &proof, true);
-        println!("verify done");
     }
 
     #[test]
@@ -573,5 +567,102 @@ mod test {
                 },
             ])
         );
+    }
+
+    #[test]
+    pub fn bench_sk_enc_full_prover() {
+        let file_path = "src/data/bench/sk_enc_1024_15x60_65537";
+
+        pub struct Config {
+            kzg_params: ParamsKZG<Bn256>,
+            k: usize,
+        }
+
+        // Generate unsafe parameters for different values of k
+        let mut configs = vec![];
+        for k in 12..=18 {
+            let kzg_params = gen_srs(k as u32);
+            let config = Config { kzg_params, k };
+            configs.push(config)
+        }
+
+        // Prepare a table to display results
+        let mut table = Table::new();
+        table.add_row(row![
+            "K",
+            "VK Generation Time",
+            "PK Generation Time",
+            "Proof Generation Time",
+            "Proof Verification Time"
+        ]);
+
+        for config in &configs {
+            // 1. Define the inputs of the circuit.
+            // Since we are going to use this circuit instance for key gen, we can use an input file in which all the coefficients are set to 0
+            let file_path_zeroes = format!("{}_zeroes.json", file_path);
+            let mut file = File::open(file_path_zeroes).unwrap();
+            let mut data = String::new();
+            file.read_to_string(&mut data).unwrap();
+            let empty_sk_enc_circuit =
+                serde_json::from_str::<BfvSkEncryptionCircuit>(&data).unwrap();
+
+            // 2. Build the circuit for key generation,
+            let mut key_gen_builder =
+                RlcCircuitBuilder::from_stage(CircuitBuilderStage::Keygen, 0).use_k(config.k);
+            key_gen_builder.base.set_lookup_bits(config.k - 1); // lookup bits set to `k-1` as suggested [here](https://docs.axiom.xyz/protocol/zero-knowledge-proofs/getting-started-with-halo2#technical-detail-how-to-choose-lookup_bits)
+
+            let rlc_circuit = RlcExecutor::new(key_gen_builder, empty_sk_enc_circuit.clone());
+
+            // The parameters are auto configured by halo2 lib to fit all the columns into the `k`-sized table
+            let rlc_circuit_params = rlc_circuit.0.calculate_params(Some(9));
+
+            // 3. Generate the verification key and the proving key
+            let timer = std::time::Instant::now();
+            let vk = keygen_vk(&config.kzg_params, &rlc_circuit).unwrap();
+            let vk_gen_time = timer.elapsed();
+            let timer = std::time::Instant::now();
+            let pk = keygen_pk(&config.kzg_params, vk, &rlc_circuit).unwrap();
+            let pk_gen_time = timer.elapsed();
+            let break_points = rlc_circuit.0.builder.borrow().break_points();
+            drop(rlc_circuit);
+
+            // 4. Generate the proof, here we pass the actual inputs
+            let mut proof_gen_builder: RlcCircuitBuilder<Fr> =
+                RlcCircuitBuilder::from_stage(CircuitBuilderStage::Prover, 0)
+                    .use_params(rlc_circuit_params);
+            proof_gen_builder.base.set_lookup_bits(config.k - 1);
+
+            let file_path = format!("{}.json", file_path);
+            let mut file = File::open(file_path).unwrap();
+            let mut data = String::new();
+            file.read_to_string(&mut data).unwrap();
+            let sk_enc_circuit = serde_json::from_str::<BfvSkEncryptionCircuit>(&data).unwrap();
+
+            let rlc_circuit = RlcExecutor::new(proof_gen_builder, sk_enc_circuit.clone());
+
+            rlc_circuit
+                .0
+                .builder
+                .borrow_mut()
+                .set_break_points(break_points);
+            let timer = std::time::Instant::now();
+            let proof = gen_proof(&config.kzg_params, &pk, rlc_circuit);
+            let proof_gen_time = timer.elapsed();
+
+            // 5. Verify the proof
+            let timer = std::time::Instant::now();
+            check_proof(&config.kzg_params, pk.get_vk(), &proof, true);
+            let proof_verification_time = timer.elapsed();
+
+            table.add_row(row![
+                config.k,
+                format!("{:?}", vk_gen_time),
+                format!("{:?}", pk_gen_time),
+                format!("{:?}", proof_gen_time),
+                format!("{:?}", proof_verification_time),
+            ]);
+        }
+        println!("bfv params: {:?}", file_path);
+        table.printstd();
     }
 }

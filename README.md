@@ -56,3 +56,36 @@ python3 scripts/test.py 20
 ```
 
 Where `20` is number of times the test should be run. Any error is added to the `scripts/error_log.txt` file.
+
+### Benches
+
+To extract the benchmarks run: 
+
+```
+cargo test --release bench_sk_enc_full_prover --features bench -- --nocapture
+```
+
+The benchmarks will run on the input located at `./src/data/bench`. The parameters of the test vector are encoded into its file name such as `sk_enc_1024_15x60_65537` that indicates a test vector for a secret key encryption scheme where `n = 1024` with 15 `qis` of 60 bits each and `t = 65537`. 
+
+### Results
+
+Benchmarks run on M2 Macbook Pro with 12 cores and 32GB of RAM.
+
+```
+bfv params: "1024_15x60_65537"
++----+--------------------+--------------------+-----------------------+-------------------------+
+| K  | VK Generation Time | PK Generation Time | Proof Generation Time | Proof Verification Time |
++----+--------------------+--------------------+-----------------------+-------------------------+
+| 12 | 5.342733167s       | 1.455136042s       | 8.1396005s            | 33.92975ms              |
++----+--------------------+--------------------+-----------------------+-------------------------+
+| 13 | 4.294825292s       | 1.071854417s       | 6.205518583s          | 16.287292ms             |
++----+--------------------+--------------------+-----------------------+-------------------------+
+| 14 | 3.476926041s       | 997.906541ms       | 5.447705958s          | 10.35275ms              |
++----+--------------------+--------------------+-----------------------+-------------------------+
+| 15 | 2.977221541s       | 951.875833ms       | 4.855866833s          | 7.845083ms              |
++----+--------------------+--------------------+-----------------------+-------------------------+
+| 16 | 2.669639666s       | 872.40775ms        | 4.620719s             | 4.239042ms              |
++----+--------------------+--------------------+-----------------------+-------------------------+
+| 17 | 2.479226667s       | 872.559833ms       | 4.958296167s          | 3.242917ms              |
++----+--------------------+--------------------+-----------------------+-------------------------+
+```
