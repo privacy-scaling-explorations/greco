@@ -248,25 +248,27 @@ mod test {
 
     use super::test_params;
     use crate::{constants::sk_enc::R1_BOUNDS, sk_encryption_circuit::BfvSkEncryptionCircuit};
-    use axiom_eth::{
-        halo2curves::bn256::Bn256,
-        rlc::{circuit::builder::RlcCircuitBuilder, utils::executor::RlcExecutor},
-    };
+    use axiom_eth::rlc::{circuit::builder::RlcCircuitBuilder, utils::executor::RlcExecutor};
     use halo2_base::{
         gates::circuit::CircuitBuilderStage,
         halo2_proofs::{
             dev::{FailureLocation, MockProver, VerifyFailure},
             halo2curves::bn256::Fr,
             plonk::{keygen_pk, keygen_vk, Any, SecondPhase},
-            poly::kzg::commitment::ParamsKZG,
         },
         utils::{
             fs::gen_srs,
             testing::{check_proof, gen_proof},
         },
     };
-    use prettytable::{row, Table};
     use std::{fs::File, io::Read};
+
+    #[cfg(feature = "bench")]
+    use axiom_eth::halo2curves::bn256::Bn256;
+    #[cfg(feature = "bench")]
+    use halo2_base::poly::kzg::commitment::ParamsKZG;
+    #[cfg(feature = "bench")]
+    use prettytable::{row, Table};
 
     #[test]
     pub fn test_sk_enc_valid() {
@@ -570,6 +572,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "bench")]
     pub fn bench_sk_enc_full_prover() {
         let file_path = "src/data/bench/sk_enc_1024_15x60_65537";
 

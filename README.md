@@ -7,6 +7,7 @@ Circuit for proving the correct encryption under BFV fully homomorphic encryptio
 To generate the parameters for the secret key proof of encryption circuit run the following command:
 
 ```bash
+export DPS=41
 python3 scripts/circuit_sk.py -n 1024 -qis '[                                      
     1152921504606584833,
     1152921504598720513,
@@ -25,6 +26,8 @@ python3 scripts/circuit_sk.py -n 1024 -qis '[
     1152921504580894721
 ]' -t 65537  -output_input ./src/data/sk_enc_input.json -output_constants ./src/constants/sk_enc.rs
 ```
+
+`DPS` must be set as enviorment variable and it is the number of decimal places for `mpmath` library. It is used to set the precision of the floating point numbers during FFT operations. When working with 60-bit coefficients, a precision of 41 is enough to avoid any overflow.
 
 Where `-n` is the degree of the polynomial, `-qis` is the list of moduli qis such that qis[i] is the modulus of the i-th CRT basis of the modulus q of the ciphertext space, `-t` is the plaintext modulus and `-output_input` is path to the json file containing the circuit input and `-output_constants` is the path to the rust file containing the circuit generic constants. The value of `𝜎` for the gaussian distribution is set to 3.2 by default.
 
