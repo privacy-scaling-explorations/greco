@@ -1,1 +1,2 @@
 bfv @ git+https://github.com/enricobottazzi/bfv-py.git@a2b7200ffd72de582b108e1ab094c2e11f6e3d3e
+mpmath==1.3.0
