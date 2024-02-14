@@ -1,3 +1,7 @@
+use crate::constants::sk_enc_constants_1024_15x60_65537::{
+    E_BOUND, K0IS, K1_BOUND, N, QIS, R1_BOUNDS, R2_BOUNDS, S_BOUND,
+};
+use crate::poly::{Poly, PolyAssigned};
 use axiom_eth::rlc::{
     chip::RlcChip,
     circuit::{builder::RlcCircuitBuilder, instructions::RlcCircuitInstructions, RlcCircuitParams},
@@ -8,9 +12,6 @@ use halo2_base::{
     QuantumCell::Constant,
 };
 use serde::Deserialize;
-
-use crate::constants::sk_enc::{E_BOUND, K0IS, K1_BOUND, N, QIS, R1_BOUNDS, R2_BOUNDS, S_BOUND};
-use crate::poly::{Poly, PolyAssigned};
 
 /// Helper function to define the parameters of the RlcCircuit. This is a non-optimized configuration that makes use of a single advice column. Use this for testing purposes only.
 pub fn test_params() -> RlcCircuitParams {
@@ -247,7 +248,10 @@ impl<F: ScalarField> RlcCircuitInstructions<F> for BfvSkEncryptionCircuit {
 mod test {
 
     use super::test_params;
-    use crate::{constants::sk_enc::R1_BOUNDS, sk_encryption_circuit::BfvSkEncryptionCircuit};
+    use crate::{
+        constants::sk_enc_constants_1024_15x60_65537::R1_BOUNDS,
+        sk_encryption_circuit::BfvSkEncryptionCircuit,
+    };
     use axiom_eth::rlc::{circuit::builder::RlcCircuitBuilder, utils::executor::RlcExecutor};
     use halo2_base::{
         gates::circuit::CircuitBuilderStage,
@@ -266,14 +270,14 @@ mod test {
     #[cfg(feature = "bench")]
     use axiom_eth::halo2curves::bn256::Bn256;
     #[cfg(feature = "bench")]
-    use halo2_base::poly::kzg::commitment::ParamsKZG;
+    use halo2_base::halo2_proofs::poly::kzg::commitment::ParamsKZG;
     #[cfg(feature = "bench")]
     use prettytable::{row, Table};
 
     #[test]
     pub fn test_sk_enc_valid() {
         // 1. Define the inputs of the circuit
-        let file_path = "src/data/sk_enc_input.json";
+        let file_path = "src/data/sk_enc_1024_15x60_65537.json";
         let mut file = File::open(file_path).unwrap();
         let mut data = String::new();
         file.read_to_string(&mut data).unwrap();
@@ -302,7 +306,7 @@ mod test {
     pub fn test_sk_enc_full_prover() {
         // 1. Define the inputs of the circuit.
         // Since we are going to use this circuit instance for key gen, we can use an input file in which all the coefficients are set to 0
-        let file_path_zeroes = "src/data/sk_enc_input_zeroes.json";
+        let file_path_zeroes = "src/data/sk_enc_1024_15x60_65537_zeroes.json";
         let mut file = File::open(file_path_zeroes).unwrap();
         let mut data = String::new();
         file.read_to_string(&mut data).unwrap();
@@ -310,7 +314,7 @@ mod test {
 
         // 2. Generate (unsafe) trusted setup parameters
         // Here we are setting a small k for optimization purposes
-        let k = 13;
+        let k = 14;
         let kzg_params = gen_srs(k as u32);
 
         // 3. Build the circuit for key generation,
@@ -335,7 +339,7 @@ mod test {
                 .use_params(rlc_circuit_params);
         proof_gen_builder.base.set_lookup_bits(k - 1);
 
-        let file_path = "src/data/sk_enc_input.json";
+        let file_path = "src/data/sk_enc_1024_15x60_65537.json";
         let mut file = File::open(file_path).unwrap();
         let mut data = String::new();
         file.read_to_string(&mut data).unwrap();
@@ -357,7 +361,7 @@ mod test {
     #[test]
     pub fn test_sk_enc_invalid_range() {
         // 1. Define the inputs of the circuit
-        let file_path = "src/data/sk_enc_input.json";
+        let file_path = "src/data/sk_enc_1024_15x60_65537.json";
         let mut file = File::open(file_path).unwrap();
         let mut data = String::new();
         file.read_to_string(&mut data).unwrap();
@@ -412,7 +416,7 @@ mod test {
     #[test]
     pub fn test_sk_enc_invalid_polys() {
         // 1. Define the inputs of the circuit
-        let file_path = "src/data/sk_enc_input.json";
+        let file_path = "src/data/sk_enc_1024_15x60_65537.json";
         let mut file = File::open(file_path).unwrap();
         let mut data = String::new();
         file.read_to_string(&mut data).unwrap();
@@ -574,7 +578,7 @@ mod test {
     #[test]
     #[cfg(feature = "bench")]
     pub fn bench_sk_enc_full_prover() {
-        let file_path = "src/data/bench/sk_enc_1024_15x60_65537";
+        let file_path = "src/data/sk_enc_1024_15x60_65537";
 
         pub struct Config {
             kzg_params: ParamsKZG<Bn256>,
@@ -600,6 +604,7 @@ mod test {
         ]);
 
         for config in &configs {
+            println!("Running bench for k={}", config.k);
             // 1. Define the inputs of the circuit.
             // Since we are going to use this circuit instance for key gen, we can use an input file in which all the coefficients are set to 0
             let file_path_zeroes = format!("{}_zeroes.json", file_path);

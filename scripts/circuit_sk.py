@@ -1,8 +1,8 @@
+import os
 from bfv.crt import CRTModuli
 from bfv.bfv import BFVCrt
 from bfv.discrete_gauss import DiscreteGaussian
 from bfv.polynomial import Polynomial, poly_div
-from bfv.utils import mod_inverse
 from random import randint
 import copy
 from utils import assign_to_circuit, count_advice_cells_needed_for_poly_range_check, print_advice_cells_info
@@ -77,9 +77,7 @@ def main(args):
         ai = cti[1].scalar_mul(-1)
 
         # k0i = -t^{-1} namely the multiplicative inverse of t modulo qi
-        k0i = mod_inverse(t, crt_moduli.qis[i]) * (-1)
-
-        # ai * s + e + k0i * k1 = hat(ct0i) (this is ct0i before reduction in the Rqi ring)
+        k0i = pow(-t, -1, qis[i])
         ct0i_hat = ai * s + e + k1.scalar_mul(k0i)
         assert(len(ct0i_hat.coefficients) - 1 == 2 * n - 2)
 
@@ -389,7 +387,37 @@ def main(args):
         "ct0is": [[str(coef) for coef in ct0i_in_p.coefficients] for ct0i_in_p in ct0is_in_p],
     }
 
-    with open(args.output_constants, 'w') as f:
+    # Calculate the bit size of the largest qi in qis for the filename
+    qis_bitsize = max(qis).bit_length()
+    qis_len = len(qis)
+
+    # Construct the dynamic filename
+    filename = f"sk_enc_{args.n}_{qis_len}x{qis_bitsize}_{args.t}.json"
+
+    output_path = os.path.join("src", "data", filename)
+
+    with open(output_path, 'w') as f:
+        json.dump(json_input, f)
+
+    # Initialize a structure to hold polynomials with zero coefficients. This will be used at key generation.
+    json_input_zeroes = {
+        "s": ["0" for _ in s_assigned.coefficients],
+        "e": ["0" for _ in e_assigned.coefficients],
+        "k1": ["0" for _ in k1_assigned.coefficients],
+        "r2is": [["0" for _ in r2i.coefficients] for r2i in r2is_assigned],
+        "r1is": [["0" for _ in r1i.coefficients] for r1i in r1is_assigned],
+        "ais": [["0" for _ in ai_in_p.coefficients] for ai_in_p in ais_in_p],
+        "ct0is": [["0" for _ in ct0i_in_p.coefficients] for ct0i_in_p in ct0is_in_p],
+    }
+
+    output_path = os.path.join("src", "data", f"sk_enc_{args.n}_{qis_len}x{qis_bitsize}_{args.t}_zeroes.json")
+
+    with open(output_path, 'w') as f:
+        json.dump(json_input_zeroes, f)
+
+    output_path = os.path.join("src", "constants", f"sk_enc_constants_{args.n}_{qis_len}x{qis_bitsize}_{args.t}.rs")
+
+    with open(output_path, 'w') as f:
         f.write(f"/// `N` is the degree of the cyclotomic polynomial defining the ring `Rq = Zq[X]/(X^N + 1)`.\n")
         f.write(f"pub const N: usize = {n};\n")
         f.write(f"/// The coefficients of the polynomial `e` should exist in the interval `[-E_BOUND, E_BOUND]` where `E_BOUND` is the upper bound of the gaussian distribution with 𝜎 = 3.2\n")
@@ -409,27 +437,6 @@ def main(args):
         f.write(f"/// List of scalars `k0is` such that `k0i[i]` is equal to the negative of the multiplicative inverses of t mod qi.\n")
         f.write(f"pub const K0IS: [&str; {len(k0i_constants)}] = [{k0is_str}];\n")
 
-    with open(args.output_input, 'w') as f:
-        json.dump(json_input, f)
-
-    # Initialize a structure to hold polynomials with zero coefficients. This will be used at key generation.
-    json_input_zeroes = {
-        "s": ["0" for _ in s_assigned.coefficients],
-        "e": ["0" for _ in e_assigned.coefficients],
-        "k1": ["0" for _ in k1_assigned.coefficients],
-        "r2is": [["0" for _ in r2i.coefficients] for r2i in r2is_assigned],
-        "r1is": [["0" for _ in r1i.coefficients] for r1i in r1is_assigned],
-        "ais": [["0" for _ in ai_in_p.coefficients] for ai_in_p in ais_in_p],
-        "ct0is": [["0" for _ in ct0i_in_p.coefficients] for ct0i_in_p in ct0is_in_p],
-    }
-
-    original_output_path = args.output_input
-    path_parts = original_output_path.rsplit('.', 1)
-    zeroed_output_path = f"{path_parts[0]}_zeroes.{path_parts[1]}"
-
-    with open(zeroed_output_path, 'w') as f:
-        json.dump(json_input_zeroes, f)
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -443,12 +450,6 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-t", type=int, required=True, help="Modulus t of the plaintext space."
-    )
-    parser.add_argument(
-        "-output_input", type=str, required=True, help="Path for the output json file containing the inputs for the circuit."
-    )
-    parser.add_argument(
-        "-output_constants", type=str, required=True, help="Path for the output rust file containing the constants for the circuit."
     )
 
     args = parser.parse_args()
