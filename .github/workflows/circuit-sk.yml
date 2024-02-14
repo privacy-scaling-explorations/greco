@@ -24,7 +24,6 @@ jobs:
 
     - name: Generate Parameters for circuit and Run Tests
       run: |
-        export DPS=41
         python3 scripts/circuit_sk.py -n 1024 -qis '[                                      
             1152921504606584833,
             1152921504598720513,
@@ -41,6 +40,6 @@ jobs:
             1152921504581877761,
             1152921504581419009,
             1152921504580894721
-        ]' -t 65537  -output_input ./src/data/sk_enc_input.json -output_constants ./src/constants/sk_enc.rs
+        ]' -t 65537
         cargo build
         cargo test --release -- --nocapture
