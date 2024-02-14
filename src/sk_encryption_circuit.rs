@@ -1,4 +1,4 @@
-use crate::constants::sk_enc_constants_2048_15x60_65537::{
+use crate::constants::sk_enc_constants_1024_15x60_65537::{
     E_BOUND, K0IS, K1_BOUND, N, QIS, R1_BOUNDS, R2_BOUNDS, S_BOUND,
 };
 use crate::poly::{Poly, PolyAssigned};
@@ -578,7 +578,7 @@ mod test {
     #[test]
     #[cfg(feature = "bench")]
     pub fn bench_sk_enc_full_prover() {
-        let file_path = "src/data/sk_enc_2048_15x60_65537";
+        let file_path = "src/data/sk_enc_1024_15x60_65537";
 
         pub struct Config {
             kzg_params: ParamsKZG<Bn256>,
