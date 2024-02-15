@@ -1,2 +1,4 @@
 pub mod sk_enc_constants_1024_15x60_65537;
 pub mod sk_enc_constants_2048_15x60_65537;
+pub mod sk_enc_constants_4096_15x60_65537;
+pub mod sk_enc_constants_8192_15x60_65537;
