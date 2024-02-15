@@ -1,8 +1,8 @@
+import os
 from bfv.crt import CRTModuli
 from bfv.bfv import BFVCrt
 from bfv.discrete_gauss import DiscreteGaussian
 from bfv.polynomial import Polynomial, poly_div
-from bfv.utils import mod_inverse
 from random import randint
 import copy
 from utils import assign_to_circuit, count_advice_cells_needed_for_poly_range_check, print_advice_cells_info
@@ -42,7 +42,7 @@ def main(args):
     assert m == message_prime
 
     # k1 = [QM]t namely the scaled message polynomial
-    k1 = Polynomial([crt_moduli.q]) * m
+    k1 = m.scalar_mul(crt_moduli.q)
     k1.reduce_coefficients_by_modulus(t)
 
     # `p` is the modulus of the prime field of the circuit
@@ -74,14 +74,11 @@ def main(args):
     for i, cti in enumerate(ctis):
 
         ct0i = cti[0]
-        ai = Polynomial([-1]) * cti[1]
+        ai = cti[1].scalar_mul(-1)
 
         # k0i = -t^{-1} namely the multiplicative inverse of t modulo qi
-        k0i = mod_inverse(t, crt_moduli.qis[i]) * (-1)
-        k0i = Polynomial([k0i])
-
-        # ai * s + e + k0i * k1 = hat(ct0i) (this is ct0i before reduction in the Rqi ring)
-        ct0i_hat = ai * s + e + k0i * k1
+        k0i = pow(-t, -1, qis[i])
+        ct0i_hat = ai * s + e + k1.scalar_mul(k0i)
         assert(len(ct0i_hat.coefficients) - 1 == 2 * n - 2)
 
         # ai * s + e + k0i * k1 = ct0i mod Rqi
@@ -96,7 +93,7 @@ def main(args):
 
         # Calculate r2i
         # divide ct0i - ct0i_hat by the cyclotomic polynomial over Zqi to get r2i
-        num = ct0i + (Polynomial([-1]) * ct0i_hat)
+        num = ct0i + ct0i_hat.scalar_mul(-1)
         # reduce the coefficients of num by the modulus qi 
         num.reduce_coefficients_by_modulus(qis[i])
         (quotient, rem) = poly_div(num.coefficients, cyclo.coefficients)
@@ -107,7 +104,7 @@ def main(args):
         assert len(r2i.coefficients) - 1 == n - 2
 
         # Assert that ct0i - ct0i_hat = r2i * cyclo mod Zqi
-        lhs = ct0i + (Polynomial([-1]) * ct0i_hat)
+        lhs = ct0i + ct0i_hat.scalar_mul(-1)
         rhs = r2i * cyclo
         # reduce the coefficients of lhs by the modulus qi
         lhs.reduce_coefficients_by_modulus(qis[i])
@@ -115,7 +112,7 @@ def main(args):
         
         # Calculate r1i
         # divide ct0i - ct0i_hat - r2i * cyclo by the modulus qi to get r1i
-        num = ct0i + (Polynomial([-1]) * ct0i_hat) + Polynomial([-1]) * (r2i * cyclo)
+        num = ct0i + ct0i_hat.scalar_mul(-1) + (r2i * cyclo).scalar_mul(-1)
         (quotient, rem) = poly_div(num.coefficients, [qis[i]])
         # assert that the remainder is zero
         assert rem == []
@@ -125,7 +122,7 @@ def main(args):
 
         # Assert that ct0i = ct0i_hat + r1i * qi + r2i * cyclo mod Zp
         lhs = ct0i
-        rhs = ct0i_hat + (r1i * Polynomial([qis[i]])) + (r2i * cyclo)
+        rhs = ct0i_hat + (r1i.scalar_mul(qis[i])) + (r2i * cyclo)
 
         # remove the leading zeroes from rhs until the length of rhs.coefficients is equal to n
         while len(rhs.coefficients) > n and rhs.coefficients[0] == 0:
@@ -205,7 +202,7 @@ def main(args):
 
         qi_constants.append(qis[i])
 
-        k0i_constant = assign_to_circuit(k0is[i], p).coefficients[0]
+        k0i_constant = assign_to_circuit(Polynomial([k0is[i]]), p).coefficients[0]
         k0i_constants.append(k0i_constant)
 
     cyclo_at_gamma = cyclo.evaluate(gamma)
@@ -298,26 +295,26 @@ def main(args):
         assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
 
         # sanity check. The coefficients of k1 * k0i should be in the range $[-\frac{t - 1}{2} \cdot |K_{0,i}|, \frac{t - 1}{2} \cdot |K_{0,i}|]$
-        bound = int((t - 1) / 2) * abs(k0is[i].coefficients[0])
-        res = k1 * k0is[i]
+        bound = int((t - 1) / 2) * abs(k0is[i])
+        res = k1.scalar_mul(k0is[i])
         assert all(coeff >= -bound and coeff <= bound for coeff in res.coefficients)
 
         # sanity check. The coefficients of ct0i_hat (ai * s + e + k1 * k0i) should be in the range $[- (N \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_{0,i}|), N \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_{0,i}|]$
-        bound = int((qis[i] - 1) / 2) * n + b + int((t - 1) / 2) * abs(k0is[i].coefficients[0])
+        bound = int((qis[i] - 1) / 2) * n + b + int((t - 1) / 2) * abs(k0is[i])
         assert all(coeff >= -bound and coeff <= bound for coeff in ct0is_hat[i].coefficients)
 
         # sanity check. The coefficients of ct0i - ct0i_hat should be in the range $ [- ((N+1) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_{0,i}|), (N+1) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_{0,i}|]$
-        bound = int((qis[i] - 1) / 2) * (n + 1) + b + int((t - 1) / 2) * abs(k0is[i].coefficients[0])
-        sub = ct0is[i] + (Polynomial([-1]) * ct0is_hat[i])
+        bound = int((qis[i] - 1) / 2) * (n + 1) + b + int((t - 1) / 2) * abs(k0is[i])
+        sub = ct0is[i] + (ct0is_hat[i].scalar_mul(-1))
         assert all(coeff >= -bound and coeff <= bound for coeff in sub.coefficients)
 
         # sanity check. The coefficients of ct0i - ct0i_hat - r2i * cyclo should be in the range $[- ((N+2) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_{0,i}|), (N+2) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_{0,i}|]$
-        bound = ((qis[i] - 1) / 2) * (n + 2) + b + ((t - 1) / 2) * abs(k0is[i].coefficients[0])
-        sub = ct0is[i]  + (Polynomial([-1]) * ct0is_hat[i]) + Polynomial([-1]) * (r2is[i] * cyclo)
+        bound = ((qis[i] - 1) / 2) * (n + 2) + b + ((t - 1) / 2) * abs(k0is[i])
+        sub = ct0is[i]  + (ct0is_hat[i].scalar_mul(-1)) + (r2is[i] * cyclo).scalar_mul(-1)
         assert all(coeff >= -bound and coeff <= bound for coeff in sub.coefficients)
 
         # constraint. The coefficients of (ct0i - ct0i_hat - r2i * cyclo) / qi = r1i should be in the range $[\frac{- ((N+2) \cdot \frac{q_i - 1}{2} + B +\frac{t - 1}{2} \cdot |K_{0,i}|)}{q_i}, \frac{(N+2) \cdot \frac{q_i - 1}{2} + B + \frac{t - 1}{2} \cdot |K_{0,i}|}{q_i}]$
-        r1i_bound = (int((qis[i] - 1) / 2) * (n + 2) + b + int((t - 1) / 2) * abs(k0is[i].coefficients[0])) / qis[i]
+        r1i_bound = (int((qis[i] - 1) / 2) * (n + 2) + b + int((t - 1) / 2) * abs(k0is[i])) / qis[i]
         # round bound to the nearest integer
         r1i_bound = int(r1i_bound)
         r1_bounds.append(r1i_bound)
@@ -368,7 +365,7 @@ def main(args):
 
         assert qis[i] == qi_constants[i]
 
-        k0i_assigned_expected = assign_to_circuit(k0is[i], p).coefficients[0]
+        k0i_assigned_expected = assign_to_circuit(Polynomial([k0is[i]]), p).coefficients[0]
         assert k0i_constants[i] == k0i_assigned_expected
 
     total_advice_cell_count = phase_0_assignment_advice_cell_count + phase_1_assignment_advice_cell_count + phase_1_range_check_advice_cell_count + phase_1_eval_at_gamma_constraint_advice_cell_count + phase_1_encryption_constraint_advice_cell_count
@@ -390,7 +387,37 @@ def main(args):
         "ct0is": [[str(coef) for coef in ct0i_in_p.coefficients] for ct0i_in_p in ct0is_in_p],
     }
 
-    with open(args.output_constants, 'w') as f:
+    # Calculate the bit size of the largest qi in qis for the filename
+    qis_bitsize = max(qis).bit_length()
+    qis_len = len(qis)
+
+    # Construct the dynamic filename
+    filename = f"sk_enc_{args.n}_{qis_len}x{qis_bitsize}_{args.t}.json"
+
+    output_path = os.path.join("src", "data", filename)
+
+    with open(output_path, 'w') as f:
+        json.dump(json_input, f)
+
+    # Initialize a structure to hold polynomials with zero coefficients. This will be used at key generation.
+    json_input_zeroes = {
+        "s": ["0" for _ in s_assigned.coefficients],
+        "e": ["0" for _ in e_assigned.coefficients],
+        "k1": ["0" for _ in k1_assigned.coefficients],
+        "r2is": [["0" for _ in r2i.coefficients] for r2i in r2is_assigned],
+        "r1is": [["0" for _ in r1i.coefficients] for r1i in r1is_assigned],
+        "ais": [["0" for _ in ai_in_p.coefficients] for ai_in_p in ais_in_p],
+        "ct0is": [["0" for _ in ct0i_in_p.coefficients] for ct0i_in_p in ct0is_in_p],
+    }
+
+    output_path = os.path.join("src", "data", f"sk_enc_{args.n}_{qis_len}x{qis_bitsize}_{args.t}_zeroes.json")
+
+    with open(output_path, 'w') as f:
+        json.dump(json_input_zeroes, f)
+
+    output_path = os.path.join("src", "constants", f"sk_enc_constants_{args.n}_{qis_len}x{qis_bitsize}_{args.t}.rs")
+
+    with open(output_path, 'w') as f:
         f.write(f"/// `N` is the degree of the cyclotomic polynomial defining the ring `Rq = Zq[X]/(X^N + 1)`.\n")
         f.write(f"pub const N: usize = {n};\n")
         f.write(f"/// The coefficients of the polynomial `e` should exist in the interval `[-E_BOUND, E_BOUND]` where `E_BOUND` is the upper bound of the gaussian distribution with 𝜎 = 3.2\n")
@@ -410,9 +437,6 @@ def main(args):
         f.write(f"/// List of scalars `k0is` such that `k0i[i]` is equal to the negative of the multiplicative inverses of t mod qi.\n")
         f.write(f"pub const K0IS: [&str; {len(k0i_constants)}] = [{k0is_str}];\n")
 
-    # write the inputs to a json file
-    with open(args.output_input, 'w') as f:
-        json.dump(json_input, f)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -426,12 +450,6 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-t", type=int, required=True, help="Modulus t of the plaintext space."
-    )
-    parser.add_argument(
-        "-output_input", type=str, required=True, help="Path for the output json file containing the inputs for the circuit."
-    )
-    parser.add_argument(
-        "-output_constants", type=str, required=True, help="Path for the output rust file containing the constants for the circuit."
     )
 
     args = parser.parse_args()
