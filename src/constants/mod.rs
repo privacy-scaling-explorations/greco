@@ -1,4 +1,4 @@
-pub mod sk_enc_constants_1024_15x60_65537;
-pub mod sk_enc_constants_2048_15x60_65537;
-pub mod sk_enc_constants_4096_15x60_65537;
-pub mod sk_enc_constants_8192_15x60_65537;
+pub mod sk_enc_constants_1024_1x27_65537;
+pub mod sk_enc_constants_2048_1x53_65537;
+pub mod sk_enc_constants_4096_2x55_65537;
+pub mod sk_enc_constants_8192_4x55_65537;

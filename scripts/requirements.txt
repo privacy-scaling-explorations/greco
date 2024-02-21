@@ -1,2 +1,1 @@
-bfv @ git+https://github.com/enricobottazzi/bfv-py.git@b32a20dede78b70359634a1f528d93ef3ed8fee2
-galois==0.3.8
+bfv @ git+https://github.com/enricobottazzi/bfv-py.git@e8239e946cab58c5c9fc974ff726010b71d92dbf
