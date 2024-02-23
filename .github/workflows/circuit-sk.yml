@@ -29,4 +29,4 @@ jobs:
             27424203952895203
         ]' -t 65537
         cargo build
-        cargo test --release -- --nocapture
+        cargo test --release --features bench -- --nocapture
