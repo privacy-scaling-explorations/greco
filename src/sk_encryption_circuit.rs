@@ -1,4 +1,4 @@
-use crate::constants::sk_enc_constants_1024_15x60_65537::{
+use crate::constants::sk_enc_constants_4096_2x55_65537::{
     E_BOUND, K0IS, K1_BOUND, N, QIS, R1_BOUNDS, R2_BOUNDS, S_BOUND,
 };
 use crate::poly::{Poly, PolyAssigned};
@@ -249,7 +249,7 @@ mod test {
 
     use super::test_params;
     use crate::{
-        constants::sk_enc_constants_1024_15x60_65537::R1_BOUNDS,
+        constants::sk_enc_constants_4096_2x55_65537::R1_BOUNDS,
         sk_encryption_circuit::BfvSkEncryptionCircuit,
     };
     use axiom_eth::rlc::{circuit::builder::RlcCircuitBuilder, utils::executor::RlcExecutor};
@@ -277,7 +277,7 @@ mod test {
     #[test]
     pub fn test_sk_enc_valid() {
         // 1. Define the inputs of the circuit
-        let file_path = "src/data/sk_enc_1024_15x60_65537.json";
+        let file_path = "src/data/sk_enc_4096_2x55_65537.json";
         let mut file = File::open(file_path).unwrap();
         let mut data = String::new();
         file.read_to_string(&mut data).unwrap();
@@ -306,7 +306,7 @@ mod test {
     pub fn test_sk_enc_full_prover() {
         // 1. Define the inputs of the circuit.
         // Since we are going to use this circuit instance for key gen, we can use an input file in which all the coefficients are set to 0
-        let file_path_zeroes = "src/data/sk_enc_1024_15x60_65537_zeroes.json";
+        let file_path_zeroes = "src/data/sk_enc_4096_2x55_65537_zeroes.json";
         let mut file = File::open(file_path_zeroes).unwrap();
         let mut data = String::new();
         file.read_to_string(&mut data).unwrap();
@@ -339,7 +339,7 @@ mod test {
                 .use_params(rlc_circuit_params);
         proof_gen_builder.base.set_lookup_bits(k - 1);
 
-        let file_path = "src/data/sk_enc_1024_15x60_65537.json";
+        let file_path = "src/data/sk_enc_4096_2x55_65537.json";
         let mut file = File::open(file_path).unwrap();
         let mut data = String::new();
         file.read_to_string(&mut data).unwrap();
@@ -361,7 +361,7 @@ mod test {
     #[test]
     pub fn test_sk_enc_invalid_range() {
         // 1. Define the inputs of the circuit
-        let file_path = "src/data/sk_enc_1024_15x60_65537.json";
+        let file_path = "src/data/sk_enc_4096_2x55_65537.json";
         let mut file = File::open(file_path).unwrap();
         let mut data = String::new();
         file.read_to_string(&mut data).unwrap();
@@ -395,19 +395,19 @@ mod test {
             Err(vec![
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 104432 }
+                    location: FailureLocation::OutsideRegion { row: 393180 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 104442 }
+                    location: FailureLocation::OutsideRegion { row: 393190 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475555 }
+                    location: FailureLocation::OutsideRegion { row: 905111 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475575 }
+                    location: FailureLocation::OutsideRegion { row: 905131 }
                 },
             ])
         );
@@ -416,7 +416,7 @@ mod test {
     #[test]
     pub fn test_sk_enc_invalid_polys() {
         // 1. Define the inputs of the circuit
-        let file_path = "src/data/sk_enc_1024_15x60_65537.json";
+        let file_path = "src/data/sk_enc_4096_2x55_65537.json";
         let mut file = File::open(file_path).unwrap();
         let mut data = String::new();
         file.read_to_string(&mut data).unwrap();
@@ -457,119 +457,15 @@ mod test {
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475555 }
+                    location: FailureLocation::OutsideRegion { row: 871319 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475575 }
+                    location: FailureLocation::OutsideRegion { row: 871339 }
                 },
                 VerifyFailure::Permutation {
                     column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475583 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475603 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475611 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475631 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475639 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475659 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475667 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475687 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475695 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475715 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475723 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475743 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475751 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475771 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475779 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475799 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475807 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475827 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475835 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475855 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475863 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475883 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475891 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475911 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475919 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475939 }
-                },
-                VerifyFailure::Permutation {
-                    column: (Any::advice_in(SecondPhase), 1).into(),
-                    location: FailureLocation::OutsideRegion { row: 1475947 }
+                    location: FailureLocation::OutsideRegion { row: 871347 }
                 },
             ])
         );
@@ -578,7 +474,7 @@ mod test {
     #[test]
     #[cfg(feature = "bench")]
     pub fn bench_sk_enc_full_prover() {
-        let file_path = "src/data/sk_enc_1024_15x60_65537";
+        let file_path = "src/data/sk_enc_4096_2x55_65537";
 
         pub struct Config {
             kzg_params: ParamsKZG<Bn256>,
