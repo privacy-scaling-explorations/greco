@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", tag = "v0.4.1-git", default-features = false, features = ["test-utils", "halo2-axiom"] }
 rand = "0.8"
-axiom-eth = { git = "https://github.com/gaussian-dev/axiom-eth", default-features = false, features = ["halo2-axiom"] }
+axiom-eth = { git = "https://github.com/enricobottazzi/axiom-eth", default-features = false, features = ["halo2-axiom"] }
 serde = { version = "=1.0", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", default-features = false }
 itertools = "0.11"
